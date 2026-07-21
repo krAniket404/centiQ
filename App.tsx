@@ -1,4 +1,5 @@
 // App.tsx
+
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   StyleSheet,
@@ -29,14 +30,34 @@ export default function App() {
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
   const [scores, setScores] = useState({ discipline: 0, impulse: 0, wellness: 0 });
 
+  //Add newly by Sanjana
+  const [mode, setMode] = useState<'strict' | 'liberal' | null>(null);
+  const [worthItTxnIds, setWorthItTxnIds] = useState<string[]>([]);
+
   // ML State
   const [model] = useState(new UserBehaviorModel()); // Initialize model once
   const [userLabels, setUserLabels] = useState<UserLabel[]>([]);
   const [labeledTxnIds, setLabeledTxnIds] = useState<string[]>([]); // To hide buttons after clicking
 
   useEffect(() => {
+    loadSavedData();
     checkPermission();
   }, []);
+
+  const loadSavedData = async () => {
+    //try {
+    //  const savedLabels = await AsyncStorage.getItem('userLabels');
+    //  if (savedLabels) {
+    //    const parsedLabels = JSON.parse(savedLabels);
+    //    setUserLabels(parsedLabels);
+    //    model.train(parsedLabels);
+    //  }
+    //  const savedMode = await AsyncStorage.getItem('userMode');
+    //  if (savedMode) setMode(savedMode as 'strict' | 'liberal');
+    //} catch (e) {
+    //  console.error("Failed to load saved data", e);
+    //}
+  };
 
   const checkPermission = async () => {
     const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
@@ -117,9 +138,23 @@ export default function App() {
     setUserLabels(updatedLabels);
     setLabeledTxnIds([...labeledTxnIds, txn.id!]);
 
+    // If "Worth it", add to exclusion list
+    if (!isImpulsive) {
+      setWorthItTxnIds([...worthItTxnIds, txn.id!]);
+    }
+
     // Retrain the model in real-time!
     model.train(updatedLabels);
-    console.log("Model Trained! Weights:", model.getModel());
+
+
+    // RECALCULATE IMPULSE SCORE (Liberal Mode!)
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    // Exclude the ones marked "Worth it"
+    const liberalTxns = debitTxns.filter(t => !worthItTxnIds.includes(t.id!));
+
+    const newImpulse = calculateImpulseIndex(liberalTxns);
+    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.discipline);
+    setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
   };
 
   // --- ONBOARDING SCREEN ---
@@ -138,6 +173,42 @@ export default function App() {
         <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
           <Text style={styles.primaryButtonText}>Connect SMS</Text>
         </TouchableOpacity>
+      </View>
+    );
+  }
+
+  // --- MODE SELECTION SCREEN ---
+  if (!mode) {
+    return (
+      <View style={styles.darkContainer}>
+        <StatusBar barStyle="light-content" />
+        <View style={styles.onboardingContent}>
+          <Text style={styles.logo}>Choose your style</Text>
+          <Text style={styles.onboardingSubtext}>
+            How do you want CentiQ to analyze your spending?
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.modeCard, { borderColor: '#F87171', borderWidth: 2 }]}
+            onPress={() => {
+              setMode('strict');
+            }}
+          >
+            <Text style={styles.modeTitle}>Strict Mode</Text>
+            <Text style={styles.modeText}>Judges spending against standard population benchmarks. No excuses, pure math.</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.modeCard, { borderColor: '#4ADE80', borderWidth: 2 }]}
+            onPress={() => {
+              setMode('liberal');
+            }}
+          >
+            <Text style={styles.modeTitle}>Liberal Mode</Text>
+            <Text style={styles.modeText}>If you're happy with a purchase, we exclude it from your impulsivity score. You define your own discipline.</Text>
+          </TouchableOpacity>
+
+        </View>
       </View>
     );
   }
@@ -200,16 +271,33 @@ export default function App() {
                       )}
                       <Text style={styles.txnDate}>{item.date.toLocaleDateString()}</Text>
                     </View>
-                    <Text style={[
-                      styles.txnAmount,
-                      { color: item.type === 'credit' ? '#4ADE80' : '#FFFFFF' }
-                    ]}>
-                      {item.type === 'credit' ? '+' : '-'}₹{item.amount}
-                    </Text>
+
+                    <View style={styles.txnRight}>
+                      {/* ML PREDICTION BADGE */}
+                      {userLabels.length >= 5 && item.type === 'debit' && (
+                        <View style={[
+                          styles.mlBadge,
+                          { backgroundColor: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? '#3A1E1E' : '#1E3A2F' }
+                        ]}>
+                          <Text style={[
+                            styles.mlBadgeText,
+                            { color: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? '#F87171' : '#4ADE80' }
+                          ]}>
+                            {Math.round(model.predict(model.extractFeatures(item, avgAmount)) * 100)}% Impulse
+                          </Text>
+                        </View>
+                      )}
+                      <Text style={[
+                        styles.txnAmount,
+                        { color: item.type === 'credit' ? '#4ADE80' : '#FFFFFF' }
+                      ]}>
+                        {item.type === 'credit' ? '+' : '-'}₹{item.amount}
+                      </Text>
+                    </View>
                   </View>
 
-                  {/* Liberal Mode Labeling Buttons (Only show for debits AND only if under 15 labels) */}
-                  {item.type === 'debit' && userLabels.length < 15 && !labeledTxnIds.includes(item.id!) ? (
+                  {/* Liberal Mode Labeling Buttons (Only show for debits, under 15 labels, AND in Liberal Mode) */}
+                  {item.type === 'debit' && mode === 'liberal' && userLabels.length < 15 && !labeledTxnIds.includes(item.id!) ? (
                     <View style={styles.labelContainer}>
                       <Text style={styles.labelPrompt}>Happy with this purchase?</Text>
                       <View style={styles.buttonRow}>
@@ -228,7 +316,7 @@ export default function App() {
                       </View>
                     </View>
                   ) : (
-                    item.type === 'debit' && labeledTxnIds.includes(item.id!) && userLabels.length < 15 && (
+                    item.type === 'debit' && mode === 'liberal' && labeledTxnIds.includes(item.id!) && userLabels.length < 15 && (
                       <Text style={styles.thankYouText}>✓ Logged for your personal model</Text>
                     )
                   )}
@@ -282,4 +370,10 @@ const styles = StyleSheet.create({
   labelButtonTextImpulse: { color: '#F87171', fontWeight: '600', fontSize: 13 },
   thankYouText: { color: '#666', fontSize: 12, textAlign: 'center', fontStyle: 'italic' },
   txnMerchant: { color: '#B0B0C0', fontSize: 13, marginBottom: 2, fontWeight: '500' },
+  txnRight: { flexDirection: 'column', alignItems: 'flex-end' },
+  mlBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 6 },
+  mlBadgeText: { fontSize: 11, fontWeight: 'bold' },
+  modeCard: { backgroundColor: '#1E2233', padding: 20, borderRadius: 12, marginBottom: 16 },
+  modeTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  modeText: { color: '#8E8E93', fontSize: 14, lineHeight: 20 },
 });
