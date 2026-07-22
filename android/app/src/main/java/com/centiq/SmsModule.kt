@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.Telephony
 import com.facebook.react.bridge.*
 import androidx.core.content.ContextCompat
+import android.content.Context
 
 class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaModule(reactContext) {
 
@@ -102,4 +103,27 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
             }
         }.start()
     }
+
+    @ReactMethod
+    fun saveData(key: String, value: String, promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("CentiQStorage", Context.MODE_PRIVATE)
+            prefs.edit().putString(key, value).apply()
+            promise.resolve(true)
+        } catch (e: Exception) {
+            promise.reject("STORAGE_SAVE_ERROR", e)
+        }
+    }
+
+    @ReactMethod
+    fun loadData(key: String, promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("CentiQStorage", Context.MODE_PRIVATE)
+            val value = prefs.getString(key, null)
+            promise.resolve(value) // resolves to null (not an error) if nothing was saved yet
+        } catch (e: Exception) {
+            promise.reject("STORAGE_LOAD_ERROR", e)
+        }
+    }
+
 }

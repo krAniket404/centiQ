@@ -1,31 +1,32 @@
-// App.tsx
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
-  PermissionsAndroid,
-  BackHandler,
-  Alert,
-  NativeModules,
-  FlatList,
-  StatusBar
+  StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
+  Alert, NativeModules, FlatList, StatusBar
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore } from './src/lib/behavioralEngine';
 import { UserBehaviorModel, UserLabel } from './src/lib/personalization';
 import { backfillHistory } from './src/lib/historicalSync';
 import BudgetsScreen from './src/screens/BudgetsScreen';
+import TransactionsScreen from './src/screens/TransactionsScreen';
 import CircularScoreCard from './src/components/CircularScoreCard';
 
 const { SmsModule } = NativeModules;
+const STORAGE_KEY = 'centiq_state_v1';
+
+const C = {
+  bg: "#080808", glass: "rgba(255,255,255,0.06)", glassStrong: "rgba(255,255,255,0.09)",
+  border: "rgba(255,255,255,0.12)", textPrimary: "#FFFFFF", textSecondary: "#B8B8B8",
+  accent: "#38BDF8", success: "#10B981", warning: "#F59E0B", danger: "#EF4444",
+};
 
 const getScoreColor = (score: number, type: 'good' | 'bad') => {
-  if (type === 'good') return score >= 70 ? '#4ADE80' : score >= 40 ? '#FACC15' : '#F87171';
-  if (type === 'bad') return score >= 70 ? '#F87171' : score >= 40 ? '#FACC15' : '#4ADE80';
-  return '#FFFFFF';
+  if (type === 'good') return score >= 70 ? C.success : score >= 40 ? C.warning : C.danger;
+  if (type === 'bad') return score >= 70 ? C.danger : score >= 40 ? C.warning : C.success;
+  return C.textPrimary;
 };
+
+const weeklySpending = [42, 58, 35, 67, 121, 158, 96];
 
 export default function App() {
   const [hasPermission, setHasPermission] = useState<boolean>(false);
@@ -34,73 +35,86 @@ export default function App() {
 
   const [mode, setMode] = useState<'strict' | 'liberal' | null>(null);
   const [worthItTxnIds, setWorthItTxnIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'budgets'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets'>('dashboard');
+  const [activeDay, setActiveDay] = useState<number | null>(null);
 
-  // ML State
   const [model] = useState(new UserBehaviorModel());
   const [userLabels, setUserLabels] = useState<UserLabel[]>([]);
   const [labeledTxnIds, setLabeledTxnIds] = useState<string[]>([]);
 
+  const savedStateRef = useRef<any>(null);
+
   useEffect(() => {
-    loadSavedData();
-    checkPermission();
+    const init = async () => {
+      const saved = await loadSavedData();
+      savedStateRef.current = saved;
+      await checkPermission(saved);
+    };
+    init();
   }, []);
 
-  const loadSavedData = async () => { };
+  const loadSavedData = async () => {
+    try {
+      const raw = await SmsModule.loadData(STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (parsed.mode) setMode(parsed.mode);
+      if (parsed.userLabels) setUserLabels(parsed.userLabels);
+      if (parsed.labeledTxnIds) setLabeledTxnIds(parsed.labeledTxnIds);
+      if (parsed.worthItTxnIds) setWorthItTxnIds(parsed.worthItTxnIds);
+      return parsed;
+    } catch (e) { return null; }
+  };
 
-  const checkPermission = async () => {
+  const saveState = async (overrides: any = {}) => {
+    const payload = {
+      mode: overrides.mode ?? mode,
+      userLabels: overrides.userLabels ?? userLabels,
+      labeledTxnIds: overrides.labeledTxnIds ?? labeledTxnIds,
+      worthItTxnIds: overrides.worthItTxnIds ?? worthItTxnIds,
+    };
+    try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
+  };
+
+  const checkPermission = async (saved?: any) => {
     const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
-    if (granted) {
-      setHasPermission(true);
-      fetchSMS();
-    }
+    if (granted) { setHasPermission(true); fetchSMS(saved); }
   };
 
   const requestPermission = async () => {
     try {
-      const granted = await PermissionsAndroid.request(
-        PermissionsAndroid.PERMISSIONS.READ_SMS,
-        {
-          title: "CentiQ Behavioral Access",
-          message: "CentiQ analyzes your transaction SMS to show you WHY you spend.",
-          buttonNeutral: "Ask Me Later",
-          buttonNegative: "Exit App",
-          buttonPositive: "Grant Access"
-        }
-      );
-
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-        setHasPermission(true);
-        fetchSMS();
-      } else {
-        Alert.alert("Permission Denied", "CentiQ cannot function without SMS access. Exiting.");
-        setTimeout(() => BackHandler.exitApp(), 1500);
-      }
-    } catch (err) {
-      console.warn(err);
-    }
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
+        title: "CentiQ Behavioral Access", message: "CentiQ analyzes your transaction SMS to show you WHY you spend.",
+        buttonNeutral: "Ask Me Later", buttonNegative: "Exit App", buttonPositive: "Grant Access"
+      });
+      if (granted === PermissionsAndroid.RESULTS.GRANTED) { setHasPermission(true); fetchSMS(savedStateRef.current); }
+      else { Alert.alert("Permission Denied", "CentiQ cannot function without SMS access. Exiting."); setTimeout(() => BackHandler.exitApp(), 1500); }
+    } catch (err) {}
   };
 
-  const fetchSMS = async () => {
+  const fetchSMS = async (saved?: any) => {
     try {
       const rawSmsList = await SmsModule.readBankSMS();
       const parsedTxns = backfillHistory(rawSmsList);
-
-      parsedTxns.forEach((txn, index) => {
-        txn.id = `txn_${index}`;
-      });
-
+      parsedTxns.forEach((txn) => { txn.id = `${txn.date.getTime()}_${txn.amount}_${txn.merchant}_${txn.type}`; });
       setTransactions(parsedTxns);
 
       const debitTxns = parsedTxns.filter(t => t.type === 'debit');
-      if (debitTxns.length > 0) {
-        const discipline = calculateDisciplineScore(debitTxns);
-        const impulse = calculateImpulseIndex(debitTxns);
-        const volatility = calculateVolatilityScore(debitTxns);
-        const wellness = calculateWellnessScore(discipline, impulse, volatility);
-        setScores({ discipline, impulse, volatility, wellness });
+      if (debitTxns.length === 0) return;
 
-        // PRE-TRAIN ML MODEL ON ALL HISTORY
+      const worthIt = saved?.worthItTxnIds ?? worthItTxnIds;
+      const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!));
+
+      const discipline = calculateDisciplineScore(debitTxns);
+      const impulse = calculateImpulseIndex(liberalTxns);
+      const volatility = calculateVolatilityScore(debitTxns);
+      const wellness = calculateWellnessScore(discipline, impulse, volatility);
+      setScores({ discipline, impulse, volatility, wellness });
+
+      const existingLabels = saved?.userLabels;
+      if (existingLabels && existingLabels.length > 0) {
+        model.train(existingLabels); setUserLabels(existingLabels);
+      } else {
         const totalSpend = debitTxns.reduce((sum, t) => sum + t.amount, 0);
         const avgAmt = totalSpend / debitTxns.length;
         const pseudoLabels: UserLabel[] = debitTxns.map(t => {
@@ -109,46 +123,34 @@ export default function App() {
           const isImpulsive = (hour >= 22 || hour <= 6) || t.amount > avgAmt ? 1 : 0;
           return { txnFeatures: features, isImpulsive };
         });
-        model.train(pseudoLabels);
-        setUserLabels(pseudoLabels);
+        model.train(pseudoLabels); setUserLabels(pseudoLabels); saveState({ userLabels: pseudoLabels });
       }
-    } catch (e) {
-      console.error("Failed to read SMS", e);
-    }
+    } catch (e) { console.error("Failed to read SMS", e); }
   };
 
   const avgAmount = useMemo(() => {
     if (transactions.length === 0) return 0;
-    const total = transactions.reduce((sum, t) => sum + t.amount, 0);
-    return total / transactions.length;
+    return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
   }, [transactions]);
 
   const handleLabelTransaction = (txn: ParsedTransaction, isImpulsive: boolean) => {
     const features = model.extractFeatures(txn, avgAmount);
-    const newLabel: UserLabel = {
-      txnFeatures: features,
-      isImpulsive: isImpulsive ? 1 : 0
-    };
-
+    const newLabel: UserLabel = { txnFeatures: features, isImpulsive: isImpulsive ? 1 : 0 };
     const updatedLabels = [...userLabels, newLabel];
-    setUserLabels(updatedLabels);
-    setLabeledTxnIds([...labeledTxnIds, txn.id!]);
+    const updatedLabeledIds = [...labeledTxnIds, txn.id!];
+    const updatedWorthIt = isImpulsive ? worthItTxnIds : [...worthItTxnIds, txn.id!];
 
-    if (!isImpulsive) {
-      setWorthItTxnIds([...worthItTxnIds, txn.id!]);
-    }
-
+    setUserLabels(updatedLabels); setLabeledTxnIds(updatedLabeledIds); setWorthItTxnIds(updatedWorthIt);
     model.train(updatedLabels);
 
     const debitTxns = transactions.filter(t => t.type === 'debit');
-    const liberalTxns = debitTxns.filter(t => !worthItTxnIds.includes(t.id!));
-
+    const liberalTxns = debitTxns.filter(t => !updatedWorthIt.includes(t.id!));
     const newImpulse = calculateImpulseIndex(liberalTxns);
-    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.discipline);
+    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
     setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
+    saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
   };
 
-  // --- ONBOARDING SCREEN ---
   if (!hasPermission) {
     return (
       <View style={styles.darkContainer}>
@@ -156,11 +158,8 @@ export default function App() {
         <View style={styles.onboardingContent}>
           <Text style={styles.logo}>CentiQ</Text>
           <Text style={styles.onboardingTitle}>Understand your money habits.</Text>
-          <Text style={styles.onboardingSubtext}>
-            Not just where you spend, but why. Connect your SMS to unlock your behavioral profile.
-          </Text>
+          <Text style={styles.onboardingSubtext}>Not just where you spend, but why. Connect your SMS to unlock your behavioral profile.</Text>
         </View>
-
         <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
           <Text style={styles.primaryButtonText}>Connect SMS</Text>
         </TouchableOpacity>
@@ -168,211 +167,153 @@ export default function App() {
     );
   }
 
-  // --- MODE SELECTION SCREEN ---
   if (!mode) {
     return (
       <View style={styles.darkContainer}>
         <StatusBar barStyle="light-content" />
         <View style={styles.onboardingContent}>
           <Text style={styles.logo}>Choose your style</Text>
-          <Text style={styles.onboardingSubtext}>
-            How do you want CentiQ to analyze your spending?
-          </Text>
-
-          <TouchableOpacity
-            style={[styles.modeCard, { borderColor: '#F87171', borderWidth: 2 }]}
-            onPress={() => setMode('strict')}
-          >
+          <Text style={styles.onboardingSubtext}>How do you want CentiQ to analyze your spending?</Text>
+          <TouchableOpacity style={[styles.modeCard, { borderColor: C.danger }]} onPress={() => { setMode('strict'); saveState({ mode: 'strict' }); }}>
             <Text style={styles.modeTitle}>Strict Mode</Text>
             <Text style={styles.modeText}>Judges spending against standard population benchmarks. No excuses, pure math.</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.modeCard, { borderColor: '#4ADE80', borderWidth: 2 }]}
-            onPress={() => setMode('liberal')}
-          >
+          <TouchableOpacity style={[styles.modeCard, { borderColor: C.success }]} onPress={() => { setMode('liberal'); saveState({ mode: 'liberal' }); }}>
             <Text style={styles.modeTitle}>Liberal Mode</Text>
             <Text style={styles.modeText}>If you're happy with a purchase, we exclude it from your impulsivity score. You define your own discipline.</Text>
           </TouchableOpacity>
-
         </View>
       </View>
     );
   }
 
-  // --- DASHBOARD SCREEN ---
   return (
     <View style={styles.darkContainer}>
       <StatusBar barStyle="light-content" />
 
-      <View style={styles.header}>
-        <Text style={styles.logo}>CentiQ</Text>
-      </View>
-
-      {/* Render Active Screen */}
       {activeTab === 'dashboard' ? (
         <FlatList
-          data={transactions}
-          keyExtractor={(item) => item.id!}
+          data={[]}
+          renderItem={null}
           contentContainerStyle={{ paddingBottom: 100 }}
           ListHeaderComponent={() => (
             <View>
-              {/* ML Status Card */}
-              <View style={styles.mlCard}>
-                <Text style={styles.mlTitle}>Personalized ML Engine</Text>
+              <View style={styles.headerRow}>
+                <View>
+                  <Text style={styles.greeting}>Welcome back</Text>
+                  <Text style={styles.headerTitle}>Your money, decoded.</Text>
+                </View>
+                <View style={[styles.glassCard, { padding: 10, marginBottom: 0 }]}>
+                  <CircularScoreCard score={scores.wellness} label="Wellness" color={C.accent} size={100} />
+                </View>
+              </View>
+
+              <View style={[styles.glassCard, { padding: 16, borderColor: 'rgba(56,189,248,0.25)' }]}>
+                <Text style={styles.mlTitle}>✨ Personalized ML Engine</Text>
                 <Text style={styles.mlStatus}>
                   {userLabels.length < 15 ? `Learning... ${userLabels.length}/15 labels needed` : `Active! Trained on ${userLabels.length} decisions`}
                 </Text>
               </View>
 
-              {/* Scores Section (Circular Charts) */}
-              <View style={styles.scoresContainer}>
-                <CircularScoreCard
-                  score={scores.wellness}
-                  label="Wellness"
-                  color={getScoreColor(scores.wellness, 'good')}
-                />
-                <CircularScoreCard
-                  score={scores.discipline}
-                  label="Discipline"
-                  color={getScoreColor(scores.discipline, 'good')}
-                />
-                <CircularScoreCard
-                  score={scores.impulse}
-                  label="Impulse"
-                  color={getScoreColor(scores.impulse, 'bad')}
-                />
-                <CircularScoreCard
-                  score={scores.volatility}
-                  label="Volatility"
-                  color={getScoreColor(scores.volatility, 'good')}
-                />
-              </View>
-
-              <Text style={styles.sectionTitle}>Recent Transactions</Text>
-            </View>
-          )}
-          renderItem={({ item }) => (
-            <View style={styles.txnCard}>
-              <View style={styles.txnRow}>
-                <View style={styles.txnLeft}>
-                  {item.merchant !== '' ? (
-                    <>
-                      <Text style={styles.txnBank}>
-                        {item.type === 'credit' ? `From: ${item.merchant}` : `To: ${item.merchant}`}
-                      </Text>
-                      <Text style={styles.txnDate}>{item.bank} • {item.date.toLocaleDateString()}</Text>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.txnBank}>{item.bank}</Text>
-                      <Text style={styles.txnDate}>{item.date.toLocaleDateString()}</Text>
-                    </>
-                  )}
+              <View style={[styles.glassCard, { padding: 22 }]}>
+                <Text style={styles.sectionLabel}>Behavior intelligence</Text>
+                <View style={styles.meterContainer}>
+                  <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline score</Text><Text style={styles.meterValue}>{scores.discipline}%</Text></View>
+                  <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: C.success }]} /></View>
                 </View>
-
-                <View style={styles.txnRight}>
-                  {userLabels.length >= 5 && item.type === 'debit' && (
-                    <View style={[
-                      styles.mlBadge,
-                      { backgroundColor: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? '#3A1E1E' : '#1E3A2F' }
-                    ]}>
-                      <Text style={[
-                        styles.mlBadgeText,
-                        { color: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? '#F87171' : '#4ADE80' }
-                      ]}>
-                        {Math.round(model.predict(model.extractFeatures(item, avgAmount)) * 100)}% Impulse
-                      </Text>
-                    </View>
-                  )}
-                  <Text style={[
-                    styles.txnAmount,
-                    { color: item.type === 'credit' ? '#4ADE80' : '#FFFFFF' }
-                  ]}>
-                    {item.type === 'credit' ? '+' : '-'}₹{item.amount}
-                  </Text>
+                <View style={styles.meterContainer}>
+                  <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Impulse index</Text><Text style={styles.meterValue}>{scores.impulse}%</Text></View>
+                  <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: C.warning }]} /></View>
+                </View>
+                <View style={styles.meterContainer}>
+                  <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Spending volatility</Text><Text style={styles.meterValue}>{scores.volatility}%</Text></View>
+                  <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: '#7F77DD' }]} /></View>
                 </View>
               </View>
 
-              {item.type === 'debit' && mode === 'liberal' && userLabels.length < 15 && !labeledTxnIds.includes(item.id!) ? (
-                <View style={styles.labelContainer}>
-                  <Text style={styles.labelPrompt}>Happy with this purchase?</Text>
-                  <View style={styles.buttonRow}>
-                    <TouchableOpacity
-                      style={[styles.labelButton, { backgroundColor: '#1E3A2F' }]}
-                      onPress={() => handleLabelTransaction(item, false)}
-                    >
-                      <Text style={styles.labelButtonTextWorth}>Worth it</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={[styles.labelButton, { backgroundColor: '#3A1E1E' }]}
-                      onPress={() => handleLabelTransaction(item, true)}
-                    >
-                      <Text style={styles.labelButtonTextImpulse}>Impulsive</Text>
-                    </TouchableOpacity>
-                  </View>
+              {/* Interactive Weekly Spending Chart */}
+              <View style={[styles.glassCard, { padding: 22 }]}>
+                <Text style={styles.sectionLabel}>Weekly spending</Text>
+                <View style={styles.chartContainer}>
+                  {weeklySpending.map((val, i) => {
+                    const maxVal = Math.max(...weeklySpending);
+                    const heightPct = (val / maxVal) * 100;
+                    return (
+                      <TouchableOpacity key={i} style={styles.chartBarWrapper} onPress={() => setActiveDay(activeDay === i ? null : i)}>
+                        {activeDay === i && <Text style={styles.chartTooltip}>₹{val}</Text>}
+                        <View style={styles.chartBarBg}>
+                          <View style={[styles.chartBarFill, { height: `${heightPct}%`, backgroundColor: activeDay === i ? C.accent : 'rgba(56,189,248,0.3)' }]} />
+                        </View>
+                        <Text style={styles.chartDayLabel}>{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </View>
-              ) : (
-                item.type === 'debit' && mode === 'liberal' && labeledTxnIds.includes(item.id!) && userLabels.length < 15 && (
-                  <Text style={styles.thankYouText}>✓ Logged for your personal model</Text>
-                )
-              )}
+              </View>
             </View>
           )}
+        />
+      ) : activeTab === 'transactions' ? (
+        <TransactionsScreen
+          transactions={transactions}
+          mode={mode}
+          userLabels={userLabels}
+          labeledTxnIds={labeledTxnIds}
+          avgAmount={avgAmount}
+          model={model}
+          handleLabelTransaction={handleLabelTransaction}
         />
       ) : (
         <BudgetsScreen transactions={transactions} />
       )}
 
-      {/* Bottom Navigation Bar */}
       <View style={styles.tabBar}>
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('dashboard')}>
           <Text style={[styles.tabText, activeTab === 'dashboard' && styles.tabTextActive]}>Dashboard</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('transactions')}>
+          <Text style={[styles.tabText, activeTab === 'transactions' && styles.tabTextActive]}>Transactions</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('budgets')}>
           <Text style={[styles.tabText, activeTab === 'budgets' && styles.tabTextActive]}>Budgets</Text>
         </TouchableOpacity>
       </View>
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  darkContainer: { flex: 1, backgroundColor: '#0F111A', paddingHorizontal: 24, paddingTop: 50 },
+  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 24, paddingTop: 50 },
   onboardingContent: { flex: 1, justifyContent: 'center' },
-  logo: { color: '#FFF', fontSize: 32, fontWeight: 'bold', marginBottom: 20 },
-  onboardingTitle: { color: '#FFF', fontSize: 28, fontWeight: '600', marginBottom: 12, lineHeight: 34 },
-  onboardingSubtext: { color: '#8E8E93', fontSize: 16, lineHeight: 22 },
-  primaryButton: { backgroundColor: '#4ADE80', padding: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20 },
-  primaryButtonText: { color: '#0F111A', fontSize: 16, fontWeight: 'bold' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  mlCard: { backgroundColor: '#1A1A2E', padding: 16, borderRadius: 12, marginBottom: 16, borderWidth: 1, borderColor: '#4ADE80' },
-  mlTitle: { color: '#4ADE80', fontSize: 14, fontWeight: 'bold', marginBottom: 4 },
-  mlStatus: { color: '#8E8E93', fontSize: 13 },
-  scoresContainer: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 32, paddingHorizontal: 4 },
-  sectionTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  txnCard: { backgroundColor: '#1E2233', padding: 16, borderRadius: 12, marginBottom: 12 },
-  txnRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
-  txnLeft: { flexDirection: 'column' },
-  txnBank: { color: '#FFF', fontSize: 15, fontWeight: '600', marginBottom: 4 },
-  txnDate: { color: '#8E8E93', fontSize: 12 },
-  txnAmount: { color: '#FFF', fontSize: 16, fontWeight: 'bold' },
-  labelContainer: { borderTopWidth: 1, borderTopColor: '#2D2D44', paddingTop: 12 },
-  labelPrompt: { color: '#8E8E93', fontSize: 12, textAlign: 'center', marginBottom: 8 },
-  buttonRow: { flexDirection: 'row', gap: 10 },
-  labelButton: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
-  labelButtonTextWorth: { color: '#4ADE80', fontWeight: '600', fontSize: 13 },
-  labelButtonTextImpulse: { color: '#F87171', fontWeight: '600', fontSize: 13 },
-  thankYouText: { color: '#666', fontSize: 12, textAlign: 'center', fontStyle: 'italic' },
-  txnRight: { flexDirection: 'column', alignItems: 'flex-end' },
-  mlBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 6 },
-  mlBadgeText: { fontSize: 11, fontWeight: 'bold' },
-  modeCard: { backgroundColor: '#1E2233', padding: 20, borderRadius: 12, marginBottom: 16 },
-  modeTitle: { color: '#FFF', fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
-  modeText: { color: '#8E8E93', fontSize: 14, lineHeight: 20 },
-  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70, backgroundColor: '#1A1A2E', flexDirection: 'row', borderTopWidth: 1, borderTopColor: '#2D2D44' },
+  logo: { color: C.textPrimary, fontSize: 32, fontWeight: 'bold', marginBottom: 20 },
+  onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34 },
+  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 22 },
+  primaryButton: { backgroundColor: C.accent, padding: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20 },
+  primaryButtonText: { color: '#001018', fontSize: 16, fontWeight: 'bold' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  greeting: { color: C.textSecondary, fontSize: 13.5, marginBottom: 4 },
+  headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700' },
+  glassCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, borderRadius: 20, marginBottom: 16 },
+  mlTitle: { color: C.accent, fontSize: 14, fontWeight: '600', marginBottom: 4 },
+  mlStatus: { color: C.textSecondary, fontSize: 13 },
+  sectionLabel: { color: C.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 16 },
+  meterContainer: { marginBottom: 16 },
+  meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  meterLabel: { color: C.textSecondary, fontSize: 12.5 },
+  meterValue: { color: C.textPrimary, fontSize: 12.5, fontWeight: '600' },
+  meterBackground: { height: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  meterFill: { height: '100%', borderRadius: 999 },
+  chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 120, alignItems: 'flex-end' },
+  chartBarWrapper: { alignItems: 'center', width: 30, height: '100%', justifyContent: 'flex-end' },
+  chartTooltip: { color: C.accent, fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
+  chartBarBg: { width: 12, height: '80%', justifyContent: 'flex-end' },
+  chartBarFill: { width: '100%', borderRadius: 6 },
+  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 6 },
+  modeCard: { backgroundColor: C.glass, borderWidth: 2, padding: 20, borderRadius: 16, marginBottom: 16 },
+  modeTitle: { color: C.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20 },
+  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70, backgroundColor: 'rgba(8,8,8,0.9)', flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  tabText: { color: '#8E8E93', fontSize: 16, fontWeight: '600' },
-  tabTextActive: { color: '#4ADE80' }
+  tabText: { color: C.textSecondary, fontSize: 14, fontWeight: '600' },
+  tabTextActive: { color: C.accent }
 });
