@@ -8,11 +8,11 @@ const C = {
 };
 
 const CAT_COLORS: { [key: string]: string } = {
-  Food: '#38BDF8', Shopping: '#7F77DD', Entertainment: '#F59E0B', Bills: '#10B981', Transport: '#5DCAA5', Other: '#888780'
+  Food: '#38BDF8', Groceries: '#84CC16', Shopping: '#7F77DD', Entertainment: '#F59E0B', Bills: '#10B981', Transport: '#5DCAA5', Other: '#888780'
 };
 
 export default function BudgetsScreen({ transactions }: { transactions: ParsedTransaction[] }) {
-  const [budgets, setBudgets] = useState({ Food: 3000, Shopping: 5000, Transport: 1500, Entertainment: 1000, Bills: 2000, Other: 2000 });
+  const [budgets, setBudgets] = useState({ Food: 3000, Groceries: 3000, Shopping: 5000, Transport: 1500, Entertainment: 1000, Bills: 2000, Other: 2000 });
   const [spent, setSpent] = useState<{[key: string]: number}>({});
 
   useEffect(() => {

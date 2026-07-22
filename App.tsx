@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar
+  Alert, NativeModules, FlatList, StatusBar, Modal
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore } from './src/lib/behavioralEngine';
@@ -10,6 +10,7 @@ import { backfillHistory } from './src/lib/historicalSync';
 import BudgetsScreen from './src/screens/BudgetsScreen';
 import TransactionsScreen from './src/screens/TransactionsScreen';
 import CircularScoreCard from './src/components/CircularScoreCard';
+import PremiumChart from './src/components/PremiumChart';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -26,17 +27,17 @@ const getScoreColor = (score: number, type: 'good' | 'bad') => {
   return C.textPrimary;
 };
 
-const weeklySpending = [42, 58, 35, 67, 121, 158, 96];
-
 export default function App() {
   const [hasPermission, setHasPermission] = useState<boolean>(false);
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
-  const [scores, setScores] = useState({ discipline: 0, impulse: 0, volatility: 0, wellness: 0 });
-
+  const [scores, setScores] = useState({ discipline: 0, impulse: 0, volatility: 0, wellness: 0, savingsRate: 0 });
   const [mode, setMode] = useState<'strict' | 'liberal' | null>(null);
   const [worthItTxnIds, setWorthItTxnIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets'>('dashboard');
   const [activeDay, setActiveDay] = useState<number | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<'week' | '3m' | '6m' | '1y'>('week');
+  const [analyticsActiveDay, setAnalyticsActiveDay] = useState<number | null>(null);
 
   const [model] = useState(new UserBehaviorModel());
   const [userLabels, setUserLabels] = useState<UserLabel[]>([]);
@@ -76,6 +77,21 @@ export default function App() {
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
 
+  const resetAppData = async () => {
+    try {
+      await SmsModule.saveData(STORAGE_KEY, JSON.stringify({}));
+      setMode(null);
+      setHasPermission(false);
+      setTransactions([]);
+      setUserLabels([]);
+      setLabeledTxnIds([]);
+      setWorthItTxnIds([]);
+      setScores({ discipline: 0, impulse: 0, volatility: 0, wellness: 0 });
+    } catch (e) {
+      console.warn("Failed to reset data", e);
+    }
+  };
+
   const checkPermission = async (saved?: any) => {
     const granted = await PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.READ_SMS);
     if (granted) { setHasPermission(true); fetchSMS(saved); }
@@ -108,6 +124,13 @@ export default function App() {
       const discipline = calculateDisciplineScore(debitTxns);
       const impulse = calculateImpulseIndex(liberalTxns);
       const volatility = calculateVolatilityScore(debitTxns);
+
+      // Calculate Savings Rate for the current month
+      const now = new Date();
+      const monthlyDebit = debitTxns.filter(t => t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+      const monthlyCredit = parsedTxns.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+      const savingsRate = monthlyCredit > 0 ? Math.max(0, Math.min(100, ((monthlyCredit - monthlyDebit) / monthlyCredit) * 100)) : 0;
+
       const wellness = calculateWellnessScore(discipline, impulse, volatility);
       setScores({ discipline, impulse, volatility, wellness });
 
@@ -132,6 +155,77 @@ export default function App() {
     if (transactions.length === 0) return 0;
     return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
   }, [transactions]);
+
+  // Real Weekly Spending Calculation
+  const weeklyData = useMemo(() => {
+    const spendByDay = [0, 0, 0, 0, 0, 0, 0]; // Sun to Sat
+    const now = new Date();
+    transactions.forEach(t => {
+      if (t.type === 'debit') {
+        const txnDate = new Date(t.date);
+        const diffTime = now.getTime() - txnDate.getTime();
+        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) {
+          spendByDay[txnDate.getDay()] += t.amount;
+        }
+      }
+    });
+    return [
+      { day: 'Mon', amount: spendByDay[1] }, { day: 'Tue', amount: spendByDay[2] },
+      { day: 'Wed', amount: spendByDay[3] }, { day: 'Thu', amount: spendByDay[4] },
+      { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
+      { day: 'Sun', amount: spendByDay[0] },
+    ];
+  }, [transactions]);
+
+  // Aggregates data for the Analytics Modal based on selected time frame
+  const analyticsData = useMemo(() => {
+    const now = new Date();
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+
+    if (analyticsPeriod === 'week') {
+      const spendByDay = [0, 0, 0, 0, 0, 0, 0];
+      debitTxns.forEach(t => {
+        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) spendByDay[t.date.getDay()] += t.amount;
+      });
+      return [
+        { day: 'Mon', amount: spendByDay[1] }, { day: 'Tue', amount: spendByDay[2] },
+        { day: 'Wed', amount: spendByDay[3] }, { day: 'Thu', amount: spendByDay[4] },
+        { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
+        { day: 'Sun', amount: spendByDay[0] },
+      ];
+    }
+
+    if (analyticsPeriod === '3m') {
+      const weeks = 12; // ~3 months
+      const data = Array(weeks).fill(0).map((_, i) => ({ day: `W${i+1}`, amount: 0 }));
+      debitTxns.forEach(t => {
+        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
+        const diffWeeks = Math.floor(diffDays / 7);
+        if (diffWeeks >= 0 && diffWeeks < weeks) data[weeks - 1 - diffWeeks].amount += t.amount;
+      });
+      return data;
+    }
+
+    // 6m and 1y (Group by Month)
+    const months = analyticsPeriod === '6m' ? 6 : 12;
+    const data = Array(months).fill(0).map((_, i) => {
+      const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1);
+      return { day: d.toLocaleString('default', { month: 'short' }), amount: 0, year: d.getFullYear(), month: d.getMonth() };
+    });
+
+    debitTxns.forEach(t => {
+      const tDate = t.date;
+      for (let i = 0; i < months; i++) {
+        if (tDate.getFullYear() === data[i].year && tDate.getMonth() === data[i].month) {
+          data[i].amount += t.amount;
+          break;
+        }
+      }
+    });
+    return data.map(d => ({ day: d.day, amount: d.amount }));
+  }, [transactions, analyticsPeriod]);
 
   const handleLabelTransaction = (txn: ParsedTransaction, isImpulsive: boolean) => {
     const features = model.extractFeatures(txn, avgAmount);
@@ -215,40 +309,91 @@ export default function App() {
                 </Text>
               </View>
 
-              <View style={[styles.glassCard, { padding: 22 }]}>
-                <Text style={styles.sectionLabel}>Behavior intelligence</Text>
-                <View style={styles.meterContainer}>
-                  <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline score</Text><Text style={styles.meterValue}>{scores.discipline}%</Text></View>
-                  <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: C.success }]} /></View>
-                </View>
-                <View style={styles.meterContainer}>
-                  <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Impulse index</Text><Text style={styles.meterValue}>{scores.impulse}%</Text></View>
-                  <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: C.warning }]} /></View>
-                </View>
-                <View style={styles.meterContainer}>
-                  <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Spending volatility</Text><Text style={styles.meterValue}>{scores.volatility}%</Text></View>
-                  <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: '#7F77DD' }]} /></View>
+              {/* Financial Wellness Card */}
+              <View style={[styles.glassCard, { padding: 22, marginBottom: 16 }]}>
+                <Text style={[styles.sectionLabel, { marginBottom: 20 }]}>FINANCIAL WELLNESS</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <View style={{ marginRight: 20 }}>
+                    <CircularScoreCard score={scores.wellness} label="Score" color={C.accent} size={110} />
+                  </View>
+
+                  <View style={{ flex: 1 }}>
+                    {/* Discipline Meter */}
+                    <View style={styles.meterContainer}>
+                      <View style={styles.meterLabelRow}>
+                        <Text style={styles.meterLabel}>Discipline</Text>
+                        <Text style={styles.meterValue}>{scores.discipline}/100</Text>
+                      </View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: C.success }]} /></View>
+                    </View>
+
+                    {/* Impulse Meter */}
+                    <View style={styles.meterContainer}>
+                      <View style={styles.meterLabelRow}>
+                        <Text style={styles.meterLabel}>Impulse Index</Text>
+                        <Text style={styles.meterValue}>{scores.impulse}/100</Text>
+                      </View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: C.warning }]} /></View>
+                    </View>
+
+                    {/* Volatility Meter */}
+                    <View style={styles.meterContainer}>
+                      <View style={styles.meterLabelRow}>
+                        <Text style={styles.meterLabel}>Volatility</Text>
+                        <Text style={styles.meterValue}>{scores.volatility}/100</Text>
+                      </View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: '#7F77DD' }]} /></View>
+                    </View>
+
+                    {/* Savings Rate Meter */}
+                    <View style={styles.meterContainer}>
+                      <View style={styles.meterLabelRow}>
+                        <Text style={styles.meterLabel}>Savings Rate</Text>
+                        <Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text>
+                      </View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: C.accent }]} /></View>
+                    </View>
+                  </View>
                 </View>
               </View>
 
-              {/* Interactive Weekly Spending Chart */}
+              {/* Bar Chart */}
               <View style={[styles.glassCard, { padding: 22 }]}>
-                <Text style={styles.sectionLabel}>Weekly spending</Text>
+                <Text style={styles.sectionLabel}>Weekly spending (Bars)</Text>
                 <View style={styles.chartContainer}>
-                  {weeklySpending.map((val, i) => {
-                    const maxVal = Math.max(...weeklySpending);
-                    const heightPct = (val / maxVal) * 100;
+                  {weeklyData.map((item, i) => {
+                    const maxVal = Math.max(...weeklyData.map(d => Number(d.amount) || 0), 1);
+                    const heightPct = ((Number(item.amount) || 0) / maxVal) * 100;
                     return (
                       <TouchableOpacity key={i} style={styles.chartBarWrapper} onPress={() => setActiveDay(activeDay === i ? null : i)}>
-                        {activeDay === i && <Text style={styles.chartTooltip}>₹{val}</Text>}
+                        {activeDay === i && (
+                          <View style={styles.barTooltip}>
+                            <Text style={styles.barTooltipText}>₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}</Text>
+                          </View>
+                        )}
                         <View style={styles.chartBarBg}>
-                          <View style={[styles.chartBarFill, { height: `${heightPct}%`, backgroundColor: activeDay === i ? C.accent : 'rgba(56,189,248,0.3)' }]} />
+                          <View style={[styles.chartBarFill, {
+                            height: `${heightPct}%`,
+                            backgroundColor: activeDay === i ? C.accent : 'rgba(56,189,248,0.3)',
+                            borderTopLeftRadius: 6, borderTopRightRadius: 6
+                          }]} />
                         </View>
-                        <Text style={styles.chartDayLabel}>{['Mon','Tue','Wed','Thu','Fri','Sat','Sun'][i]}</Text>
+                        <Text style={styles.chartDayLabel}>{item.day}</Text>
                       </TouchableOpacity>
                     );
                   })}
                 </View>
+              </View>
+
+              {/* Area / Line Chart */}
+              <View style={[styles.glassCard, { padding: 22 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={styles.sectionLabel}>Weekly spending (Trend)</Text>
+                  <TouchableOpacity onPress={() => setShowAnalytics(true)}>
+                       <Text style={{ color: C.textSecondary, fontSize: 12 }}>View analytics</Text>
+                  </TouchableOpacity>
+                </View>
+                <PremiumChart data={weeklyData} activeDay={activeDay} setActiveDay={setActiveDay} />
               </View>
             </View>
           )}
@@ -278,6 +423,50 @@ export default function App() {
           <Text style={[styles.tabText, activeTab === 'budgets' && styles.tabTextActive]}>Budgets</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Floating Reset Button for Testing */}
+      <TouchableOpacity style={styles.resetBtn} onPress={resetAppData}>
+        <Text style={styles.resetBtnText}>Reset</Text>
+      </TouchableOpacity>
+
+      {/* Analytics Modal */}
+      <Modal visible={showAnalytics} animationType="slide" transparent={true} onRequestClose={() => setShowAnalytics(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Spending Analytics</Text>
+              <TouchableOpacity onPress={() => setShowAnalytics(false)}>
+                <Text style={styles.closeBtn}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {/* Time Period Selector */}
+            <View style={styles.periodSelector}>
+              {[
+                { key: 'week', label: '1W' },
+                { key: '3m', label: '3M' },
+                { key: '6m', label: '6M' },
+                { key: '1y', label: '1Y' }
+              ].map(p => (
+                <TouchableOpacity
+                  key={p.key}
+                  style={[styles.periodBtn, analyticsPeriod === p.key && styles.periodBtnActive]}
+                  onPress={() => { setAnalyticsPeriod(p.key as any); setAnalyticsActiveDay(null); }}
+                >
+                  <Text style={[styles.periodBtnText, analyticsPeriod === p.key && styles.periodBtnTextActive]}>{p.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* The Dynamic Chart */}
+            <View style={{ marginTop: 20, alignItems: 'center' }}>
+              <PremiumChart data={analyticsData} activeDay={analyticsActiveDay} setActiveDay={setAnalyticsActiveDay} />
+            </View>
+
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -303,17 +492,46 @@ const styles = StyleSheet.create({
   meterValue: { color: C.textPrimary, fontSize: 12.5, fontWeight: '600' },
   meterBackground: { height: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
   meterFill: { height: '100%', borderRadius: 999 },
-  chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 120, alignItems: 'flex-end' },
-  chartBarWrapper: { alignItems: 'center', width: 30, height: '100%', justifyContent: 'flex-end' },
-  chartTooltip: { color: C.accent, fontSize: 12, fontWeight: 'bold', marginBottom: 4 },
-  chartBarBg: { width: 12, height: '80%', justifyContent: 'flex-end' },
-  chartBarFill: { width: '100%', borderRadius: 6 },
-  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 6 },
-  modeCard: { backgroundColor: C.glass, borderWidth: 2, padding: 20, borderRadius: 16, marginBottom: 16 },
+  chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 140, alignItems: 'flex-end', marginTop: 20 },
+  chartBarWrapper: { alignItems: 'center', width: 38, height: '100%', justifyContent: 'flex-end' },
+  barTooltip: {
+    position: 'absolute',
+    top: -10,
+    backgroundColor: C.accent,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    zIndex: 10,
+    minWidth: 50, // Force it to be wider
+    left: -6, // Center it over the bar
+    alignItems: 'center'
+  },
+  barTooltipText: {
+    color: '#001018',
+    fontSize: 11,
+    fontWeight: 'bold',
+    flexWrap: 'nowrap' // Prevent text from wrapping to the next line
+  },
+  chartBarBg: { width: 14, height: '75%', justifyContent: 'flex-end' },
+  chartBarFill: { width: '100%' },
+  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 6 },  modeCard: { backgroundColor: C.glass, borderWidth: 2, padding: 20, borderRadius: 16, marginBottom: 16 },
   modeTitle: { color: C.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20 },
   tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70, backgroundColor: 'rgba(8,8,8,0.9)', flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   tabText: { color: C.textSecondary, fontSize: 14, fontWeight: '600' },
-  tabTextActive: { color: C.accent }
+  tabTextActive: { color: C.accent },
+  resetBtn: { position: 'absolute', top: 50, right: 24, backgroundColor: 'rgba(239,68,68,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(239,68,68,0.5)' },
+  resetBtnText: { color: C.danger, fontSize: 12, fontWeight: 'bold' },
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, height: '60%', borderWidth: 1, borderColor: C.border },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { color: C.textPrimary, fontSize: 20, fontWeight: 'bold' },
+  closeBtn: { color: C.textSecondary, fontSize: 18, padding: 8 },
+  periodSelector: { flexDirection: 'row', backgroundColor: C.glass, borderRadius: 12, padding: 4 },
+  periodBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
+  periodBtnActive: { backgroundColor: C.accent },
+  periodBtnText: { color: C.textSecondary, fontSize: 14, fontWeight: '600' },
+  periodBtnTextActive: { color: '#001018', fontWeight: 'bold' }
 });
