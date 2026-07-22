@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
+import android.provider.Telephony
 import com.facebook.react.bridge.*
 import androidx.core.content.ContextCompat
 
@@ -26,7 +27,7 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
                     arrayOf("body", "date"),
                     "body LIKE ? OR body LIKE ? OR body LIKE ?",
                     arrayOf("%Rs%", "%INR%", "%₹%"),
-                    "date DESC LIMIT 100"
+                    "date DESC LIMIT 1000"
                 )
 
                 val smsList = Arguments.createArray()
@@ -43,6 +44,61 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
                 promise.resolve(smsList)
             } catch (e: Exception) {
                 promise.reject("SMS_READ_ERROR", e)
+            }
+        }.start()
+    }
+
+    // Change 'daysBack: Int' to 'daysBack: Double'
+    @ReactMethod
+    fun getHistoricalSms(daysBack: Double, promise: Promise) {
+        Thread {
+            try {
+                val resolver = reactApplicationContext.contentResolver
+
+                // Convert Double to Int safely
+                val days = daysBack.toInt()
+                val cutoffMillis = System.currentTimeMillis() - (days.toLong() * 24 * 60 * 60 * 1000)
+                val projection = arrayOf(
+                    Telephony.Sms.ADDRESS,
+                    Telephony.Sms.BODY,
+                    Telephony.Sms.DATE
+                )
+
+                val selection = "${Telephony.Sms.DATE} >= ?"
+                val selectionArgs = arrayOf(cutoffMillis.toString())
+
+                val cursor = resolver.query(
+                    Telephony.Sms.Inbox.CONTENT_URI,
+                    projection,
+                    selection,
+                    selectionArgs,
+                    "${Telephony.Sms.DATE} DESC"
+                )
+
+                val results = Arguments.createArray()
+                val transactionalKeywords = listOf("Rs", "INR", "debited", "credited", "spent", "sent", "withdrawn")
+
+                cursor?.use {
+                    val addressIdx = it.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
+                    val bodyIdx = it.getColumnIndexOrThrow(Telephony.Sms.BODY)
+                    val dateIdx = it.getColumnIndexOrThrow(Telephony.Sms.DATE)
+
+                    while (it.moveToNext()) {
+                        val body = it.getString(bodyIdx) ?: continue
+                        val isTransactional = transactionalKeywords.any { kw -> body.contains(kw, ignoreCase = true) }
+                        if (!isTransactional) continue
+
+                        val map = Arguments.createMap()
+                        map.putString("sender", it.getString(addressIdx) ?: "")
+                        map.putString("body", body)
+                        map.putDouble("date", it.getLong(dateIdx).toDouble()) // Changed from timestamp to date
+                        results.pushMap(map)
+                    }
+                }
+
+                promise.resolve(results)
+            } catch (e: Exception) {
+                promise.reject("SMS_HISTORY_ERROR", "Failed to read SMS history: ${e.message}", e)
             }
         }.start()
     }

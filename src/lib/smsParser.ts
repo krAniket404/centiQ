@@ -6,46 +6,63 @@ export interface ParsedTransaction {
   raw: string;
   type: 'debit' | 'credit';
   merchant: string;
+  category?: string;
 }
 
 export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransaction | null {
   let amount = 0;
-  let bank = 'Unknown';
+  let bank = 'Transaction';
   let type: 'debit' | 'credit' | null = null;
-  let merchant = 'Unknown';
+  let merchant = '';
 
   const upperBody = smsBody.toUpperCase();
 
-  // 1. Determine Transaction Type (Credit vs Debit)
+  // 1. Transaction Type
   const creditKeywords = ['CREDITED', 'RECEIVED', 'REFUND', 'ADDED', 'DEPOSITED', 'REVERSAL'];
   const debitKeywords = ['DEBITED', 'SPENT', 'PAID', 'PURCHASE', 'WITHDRAWN', 'SENT', 'DEDUCTED'];
-
-  if (creditKeywords.some(kw => upperBody.includes(kw))) {
-    type = 'credit';
-  } else if (debitKeywords.some(kw => upperBody.includes(kw))) {
-    type = 'debit';
-  } else {
-    return null; // If it doesn't have a clear transaction keyword, ignore it
-  }
+  if (creditKeywords.some(kw => upperBody.includes(kw))) type = 'credit';
+  else if (debitKeywords.some(kw => upperBody.includes(kw))) type = 'debit';
+  else return null;
 
   // 2. Extract Amount
   const amountRegex = /(?:Rs\.?|INR|₹)\s?([\d,]+\.?\d*)/i;
   const match = smsBody.match(amountRegex);
   if (match && match[1]) {
     amount = parseFloat(match[1].replace(/,/g, ''));
+  } else return null;
+
+  // 3. Extract Merchant / Sender based on Type
+  if (type === 'credit') {
+    // For credits, look for "from MERCHANT" or "from VPA"
+    const vpaRegex = /from\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
+    const vpaMatch = smsBody.match(vpaRegex);
+    if (vpaMatch && vpaMatch[1]) {
+      merchant = vpaMatch[1].trim().toUpperCase();
+    } else {
+      const fromRegex = /from\s+([A-Za-z0-9\s&'-]{3,30})/i;
+      const fromMatch = smsBody.match(fromRegex);
+      if (fromMatch && fromMatch[1]) {
+        merchant = fromMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
+      }
+    }
   } else {
-    return null;
+    // For debits, look for "to MERCHANT", "at MERCHANT", or "to VPA"
+    const vpaRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
+    const vpaMatch = smsBody.match(vpaRegex);
+    if (vpaMatch && vpaMatch[1]) {
+      merchant = vpaMatch[1].trim().toUpperCase();
+    } else {
+      const toRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]{3,30})/i;
+      const toMatch = smsBody.match(toRegex);
+      if (toMatch && toMatch[1]) {
+        merchant = toMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
+      }
+    }
   }
 
-  // 3. Extract Merchant (Who was paid?)
-  // Looks for "at MERCHANT", "to MERCHANT", "via MERCHANT" and grabs the next 1-3 words
-  const merchantRegex = /(?:at|to|via|from)\s+([A-Za-z0-9\s&'-]{3,20})/i;
-  const merchantMatch = smsBody.match(merchantRegex);
-  if (merchantMatch && merchantMatch[1]) {
-    // Clean up the merchant name (remove trailing words like "on", "ref", etc.)
-    merchant = merchantMatch[1].trim().split(' ').slice(0, 2).join(' ');
-    merchant = merchant.toUpperCase();
-  }
+  // Clean up common garbage words
+  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL)\b/g, '').trim();
+  if (merchant.length < 3) merchant = '';
 
   // 4. Identify Bank
   if (upperBody.includes('HDFC')) bank = 'HDFC';
@@ -53,16 +70,7 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   else if (upperBody.includes('ICICI')) bank = 'ICICI';
   else if (upperBody.includes('AXIS')) bank = 'AXIS';
   else if (upperBody.includes('KOTAK')) bank = 'KOTAK';
-  else if (upperBody.includes('ONEPLUS')) bank = 'OnePlus';
 
   const date = new Date(smsDate);
-
-  return {
-    amount,
-    date,
-    bank,
-    raw: smsBody,
-    type,
-    merchant
-  };
+  return { amount, date, bank, raw: smsBody, type, merchant };
 }
