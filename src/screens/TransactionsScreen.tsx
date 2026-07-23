@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, FlatList, StyleSheet, TouchableOpacity, TextInput, ScrollView } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
 import { UserBehaviorModel, UserLabel } from '../lib/personalization';
+import { detectAnomaly } from '../lib/anomalyDetector';
 
 const C = {
   bg: "#080808", glass: "rgba(255,255,255,0.07)", border: "rgba(255,255,255,0.13)",
@@ -93,13 +94,14 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
                     <Text style={styles.txnMerchant} numberOfLines={1}>{name}</Text>
                     <View style={styles.catRow}>
                       <View style={[styles.catDot, { backgroundColor: accentColor }]} />
-                      <Text style={styles.txnDate} numberOfLines={1}>{category} · {item.date.toLocaleDateString()}</Text>
+                      <Text style={styles.txnDate} numberOfLines={1}>{category} • {item.date.toLocaleDateString()}</Text>
                     </View>
                   </View>
                 </View>
 
                 {/* Right Side with flexShrink: 0 so it never squishes */}
                 <View style={styles.txnRight}>
+                  {/* ML Impulse Badge */}
                   {userLabels.length >= 5 && item.type === 'debit' && (
                     <View style={[styles.mlBadge, { backgroundColor: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)' }]}>
                       <Text style={[styles.mlBadgeText, { color: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? C.danger : C.success }]}>
@@ -107,6 +109,16 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
                       </Text>
                     </View>
                   )}
+
+                  {/* Anomaly Badge */}
+                  {detectAnomaly(item, transactions).isAnomaly && (
+                    <View style={[styles.mlBadge, { backgroundColor: 'rgba(245,158,11,0.15)', marginTop: 4 }]}>
+                      <Text style={[styles.mlBadgeText, { color: C.warning }]}>
+                        ⚠️ Unusual
+                      </Text>
+                    </View>
+                  )}
+
                   <Text style={[styles.txnAmount, { color: item.type === 'credit' ? C.success : C.textPrimary }]}>
                     {item.type === 'credit' ? '+' : '-'}₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}
                   </Text>
@@ -114,6 +126,7 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
                 </View>
               </View>
 
+              {/* Liberal Mode Labeling Buttons */}
               {item.type === 'debit' && mode === 'liberal' && userLabels.length < 15 && !labeledTxnIds.includes(item.id!) ? (
                 <View style={styles.labelContainer}>
                   <View style={styles.buttonRow}>

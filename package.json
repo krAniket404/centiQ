@@ -14,7 +14,8 @@
     "@supabase/supabase-js": "^2.110.7",
     "data-fns": "^1.1.0",
     "react": "19.2.3",
-    "react-native": "0.86.0"
+    "react-native": "0.86.0",
+    "react-native-url-polyfill": "^4.0.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

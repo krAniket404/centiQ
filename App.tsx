@@ -12,6 +12,10 @@ import TransactionsScreen from './src/screens/TransactionsScreen';
 import AICoachScreen from './src/screens/AICoachScreen';
 import CircularScoreCard from './src/components/CircularScoreCard';
 import PremiumChart from './src/components/PremiumChart';
+import { supabase } from './src/lib/supabase';
+import AuthScreen from './src/screens/AuthScreen';
+import { Session } from '@supabase/supabase-js';
+import SettingsScreen from './src/screens/SettingsScreen';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -45,7 +49,7 @@ export default function App() {
 
   const [mode, setMode] = useState<'strict' | 'liberal' | null>(null);
   const [worthItTxnIds, setWorthItTxnIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets' | 'coach'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets' | 'coach' | 'settings'>('dashboard');
   const [activeDay, setActiveDay] = useState<number | null>(null);
 
   const [model] = useState(new UserBehaviorModel());
@@ -53,6 +57,18 @@ export default function App() {
   const [labeledTxnIds, setLabeledTxnIds] = useState<string[]>([]);
 
   const savedStateRef = useRef<any>(null);
+
+  const [session, setSession] = useState<Session | null>(null);
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+    });
+
+    supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+  }, []);
 
   useEffect(() => {
     const init = async () => {
@@ -117,6 +133,7 @@ export default function App() {
       const parsedTxns = backfillHistory(rawSmsList);
       parsedTxns.forEach((txn) => { txn.id = `${txn.date.getTime()}_${txn.amount}_${txn.merchant}_${txn.type}`; });
       setTransactions(parsedTxns);
+      syncToCloud(parsedTxns);
 
       const debitTxns = parsedTxns.filter(t => t.type === 'debit');
       if (debitTxns.length === 0) return;
@@ -151,6 +168,32 @@ export default function App() {
         model.train(pseudoLabels); setUserLabels(pseudoLabels); saveState({ userLabels: pseudoLabels });
       }
     } catch (e) { console.error("Failed to read SMS", e); }
+  };
+
+  const syncToCloud = async (txns: ParsedTransaction[]) => {
+    // If login is bypassed, we use a mock user ID for testing
+    const userId = session?.user?.id || '00000000-0000-0000-0000-000000000000';
+
+    const payload = txns.map(t => ({
+      user_id: userId,
+      amount: t.amount,
+      merchant: t.merchant,
+      category: t.category,
+      txn_date: t.date.toISOString(),
+      type: t.type
+    }));
+
+    try {
+      // Upload to Supabase (ignoring duplicates)
+      const { error } = await supabase
+        .from('transactions')
+        .upsert(payload, { onConflict: 'user_id, txn_date, amount, merchant' });
+
+      if (error) console.warn('Cloud sync error:', error.message);
+      else console.log('☁️ Synced transactions to Supabase!');
+    } catch (e) {
+      console.warn('Failed to sync to cloud', e);
+    }
   };
 
   const avgAmount = useMemo(() => {
@@ -192,6 +235,10 @@ export default function App() {
     setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
     saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
   };
+  //Temporary Login bypass
+  //if(!session){
+  //    return <AuthScreen/> ;
+  //    }
 
   if (!hasPermission) {
     return (
@@ -307,7 +354,7 @@ export default function App() {
                 </View>
               </View>
 
-              {/* Area Chart */}
+              {/* Premium Weekly Spending Chart */}
               <View style={[styles.glassCard, { padding: 22, marginTop: 16 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (TREND)</Text>
@@ -330,8 +377,15 @@ export default function App() {
         />
       ) : activeTab === 'budgets' ? (
         <BudgetsScreen transactions={transactions} />
-      ) : (
+      ) : activeTab === 'coach' ? (
         <AICoachScreen transactions={transactions} scores={scores} />
+      ) : (
+        <SettingsScreen
+          mode={mode}
+          setMode={(m) => { setMode(m); saveState({ mode: m }); }}
+          resetAppData={resetAppData}
+          userLabels={userLabels}
+        />
       )}
 
       <View style={styles.tabBar}>
@@ -347,7 +401,11 @@ export default function App() {
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('coach')}>
           <Text style={[styles.tabText, activeTab === 'coach' && styles.tabTextActive]}>AI Coach</Text>
         </TouchableOpacity>
-      </View>
+        {/* ADD THIS NEW BUTTON */}
+        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('settings')}>
+          <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive]}>Settings</Text>
+        </TouchableOpacity>
+      </View>      
     </View>
   );
 }
