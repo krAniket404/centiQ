@@ -11,7 +11,7 @@ export interface ParsedTransaction {
 
 export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransaction | null {
   let amount = 0;
-  let bank = 'Transaction';
+  let bank = 'Bank'; // Changed from 'Transaction'
   let type: 'debit' | 'credit' | null = null;
   let merchant = '';
 
@@ -33,25 +33,27 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
 
   // 3. Extract Merchant / Sender based on Type
   if (type === 'credit') {
-    // For credits, look for "from MERCHANT" or "from VPA"
-    const vpaRegex = /from\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
+    // For credits, look for "from VPA", "by VPA", "via VPA"
+    const vpaRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
     const vpaMatch = smsBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       merchant = vpaMatch[1].trim().toUpperCase();
     } else {
-      const fromRegex = /from\s+([A-Za-z0-9\s&'-]{3,30})/i;
+      // Look for "from NAME", "by NAME", "via NAME"
+      const fromRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]{3,30})/i;
       const fromMatch = smsBody.match(fromRegex);
       if (fromMatch && fromMatch[1]) {
         merchant = fromMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
       }
     }
   } else {
-    // For debits, look for "to MERCHANT", "at MERCHANT", or "to VPA"
+    // For debits, look for "to VPA", "at VPA", "via VPA"
     const vpaRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
     const vpaMatch = smsBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       merchant = vpaMatch[1].trim().toUpperCase();
     } else {
+      // Look for "to NAME", "at NAME", "via NAME"
       const toRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]{3,30})/i;
       const toMatch = smsBody.match(toRegex);
       if (toMatch && toMatch[1]) {
@@ -62,7 +64,11 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
 
   // Clean up common garbage words
   merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL)\b/g, '').trim();
-  if (merchant.length < 3) merchant = '';
+
+  // Fallback if no name found
+  if (merchant.length < 3) {
+    merchant = type === 'credit' ? 'Income' : 'Merchant';
+  }
 
   // 4. Identify Bank
   if (upperBody.includes('HDFC')) bank = 'HDFC';

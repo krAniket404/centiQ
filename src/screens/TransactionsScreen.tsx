@@ -4,20 +4,13 @@ import { ParsedTransaction } from '../lib/smsParser';
 import { UserBehaviorModel, UserLabel } from '../lib/personalization';
 
 const C = {
-  bg: "#080808", glass: "rgba(255,255,255,0.06)", border: "rgba(255,255,255,0.12)",
+  bg: "#080808", glass: "rgba(255,255,255,0.07)", border: "rgba(255,255,255,0.13)",
   textPrimary: "#FFFFFF", textSecondary: "#B8B8B8", accent: "#38BDF8", success: "#10B981", warning: "#F59E0B", danger: "#EF4444",
 };
 
-// Distinct Neon Colors for each category
 const CAT_COLORS: { [key: string]: string } = {
-  Food: '#38BDF8',          // Neon Blue
-  Groceries: '#84CC16',     // Neon Lime
-  Shopping: '#A855F7',      // Neon Purple
-  Entertainment: '#F59E0B', // Neon Orange
-  Bills: '#10B981',         // Neon Green
-  Transport: '#2DD4BF',     // Neon Teal
-  Other: '#94A3B8',         // Neon Slate
-  Income: '#22C55E'         // Neon Mint
+  Food: '#F59E0B', Groceries: '#84CC16', Shopping: '#8B5CF6', Travel: '#38BDF8',
+  Entertainment: '#EF4444', Bills: '#10B981', Health: '#F97316', Other: '#64748B', Income: '#10B981'
 };
 
 interface Props {
@@ -34,7 +27,7 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
 
-  const categories = ['All', 'Food', 'Groceries', 'Shopping', 'Entertainment', 'Bills', 'Transport', 'Other'];
+  const categories = ['All', 'Food', 'Groceries', 'Shopping', 'Travel', 'Entertainment', 'Bills', 'Health', 'Income', 'Other'];
 
   const filteredTxns = transactions.filter(t => {
     const matchesSearch = (t.merchant || t.bank).toLowerCase().includes(searchQuery.toLowerCase());
@@ -45,14 +38,15 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
   return (
     <View style={{ flex: 1, marginTop: 20 }}>
       <Text style={styles.headerTitle}>Transactions</Text>
+      <Text style={styles.subtleText}>{filteredTxns.length} found</Text>
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <Text style={styles.searchIcon}>🔍</Text>
         <TextInput
           style={styles.searchInput}
-          placeholder="Search transactions..."
-          placeholderTextColor={C.textSecondary}
+          placeholder="Search merchants…"
+          placeholderTextColor="#555"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
@@ -81,37 +75,30 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
         keyExtractor={(item) => item.id!}
         contentContainerStyle={{ paddingBottom: 100, paddingTop: 8 }}
         renderItem={({ item }) => {
-          // Extract first letter for the Box Avatar
           const name = item.merchant || item.bank || '?';
           const firstLetter = name.charAt(0).toUpperCase();
-
-          // Determine category and neon color
           const category = item.category || (item.type === 'credit' ? 'Income' : 'Other');
-          const avatarColor = item.type === 'credit' ? CAT_COLORS.Income : (CAT_COLORS[category] || CAT_COLORS.Other);
+          const accentColor = item.type === 'credit' ? CAT_COLORS.Income : (CAT_COLORS[category] || CAT_COLORS.Other);
 
           return (
             <View style={styles.txnCard}>
               <View style={styles.txnRow}>
                 <View style={styles.txnLeft}>
-                  {/* Neon Box Avatar */}
-                  <View style={[
-                    styles.avatarBox,
-                    {
-                      borderColor: avatarColor,
-                      backgroundColor: `${avatarColor}15`, // Add 15% opacity background
-                      shadowColor: avatarColor,
-                      shadowOpacity: 0.8,
-                      shadowRadius: 6,
-                      elevation: 6
-                    }
-                  ]}>
-                    <Text style={[styles.avatarText, { color: avatarColor }]}>{firstLetter}</Text>
+                  <View style={[styles.avatarBox, { backgroundColor: `${accentColor}18`, borderColor: `${accentColor}30` }]}>
+                    <Text style={[styles.avatarText, { color: accentColor }]}>{firstLetter}</Text>
                   </View>
-                  <View>
-                    <Text style={styles.txnMerchant}>{name}</Text>
-                    <Text style={styles.txnDate}>{category} • {item.date.toLocaleDateString()}</Text>
+
+                  {/* Text Container with flexShrink to prevent pushing */}
+                  <View style={styles.txnInfo}>
+                    <Text style={styles.txnMerchant} numberOfLines={1}>{name}</Text>
+                    <View style={styles.catRow}>
+                      <View style={[styles.catDot, { backgroundColor: accentColor }]} />
+                      <Text style={styles.txnDate} numberOfLines={1}>{category} · {item.date.toLocaleDateString()}</Text>
+                    </View>
                   </View>
                 </View>
+
+                {/* Right Side with flexShrink: 0 so it never squishes */}
                 <View style={styles.txnRight}>
                   {userLabels.length >= 5 && item.type === 'debit' && (
                     <View style={[styles.mlBadge, { backgroundColor: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)' }]}>
@@ -152,40 +139,39 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
 }
 
 const styles = StyleSheet.create({
-  headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700', marginBottom: 16 },
-  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingHorizontal: 16, marginBottom: 16 },
-  searchIcon: { fontSize: 14, marginRight: 12 },
+  headerTitle: { color: C.textPrimary, fontSize: 24, fontWeight: '700' },
+  subtleText: { color: C.textSecondary, fontSize: 12, marginBottom: 16 },
+  searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.10)', borderRadius: 14, paddingHorizontal: 16, marginBottom: 16 },
+  searchIcon: { fontSize: 14, marginRight: 12, color: '#555' },
   searchInput: { flex: 1, color: C.textPrimary, paddingVertical: 14, fontSize: 14 },
   chipScrollView: { flexGrow: 0, marginBottom: 8 },
-  chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, marginRight: 8 },
+  chip: { paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.1)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.15)', marginRight: 10 },
   chipActive: { backgroundColor: C.accent, borderColor: C.accent },
-  chipText: { color: C.textSecondary, fontSize: 13, fontWeight: '600' },
+  chipText: { color: '#FFFFFF', fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: '#001018', fontWeight: 'bold' },
-  txnCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, padding: 16, borderRadius: 16, marginBottom: 10 },
+
+  txnCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, padding: 16, borderRadius: 20, marginBottom: 10 },
   txnRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  txnLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
 
-  // The Neon Box Avatar
-  avatarBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12, // Squircle/Box shape
-    borderWidth: 1.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-    shadowOffset: { width: 0, height: 0 },
-  },
+  // Left side: Avatar + Info
+  txnLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
+  avatarBox: { width: 44, height: 44, borderRadius: 12, borderWidth: 1, justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   avatarText: { fontSize: 18, fontWeight: 'bold' },
+  txnInfo: { flexShrink: 1 }, // Allows text to truncate instead of pushing layout
 
-  txnMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 4 },
-  txnDate: { color: C.textSecondary, fontSize: 12 },
-  txnRight: { flexDirection: 'column', alignItems: 'flex-end' },
+  txnMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '500', marginBottom: 2 },
+  catRow: { flexDirection: 'row', alignItems: 'center' },
+  catDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
+  txnDate: { color: C.textSecondary, fontSize: 11 },
+
+  // Right side: Amount + Badge
+  txnRight: { flexDirection: 'column', alignItems: 'flex-end', flexShrink: 0 }, // Prevents right side from squishing
   mlBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 4 },
   mlBadgeText: { fontSize: 11, fontWeight: 'bold' },
   txnAmount: { fontSize: 16, fontWeight: 'bold' },
   statusText: { color: C.textSecondary, fontSize: 10, marginTop: 2, textTransform: 'uppercase' },
-  labelContainer: { borderTopWidth: 1, borderTopColor: C.border, paddingTop: 12, marginTop: 12 },
+
+  labelContainer: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 12, marginTop: 12 },
   buttonRow: { flexDirection: 'row', gap: 10 },
   labelButton: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
   labelButtonText: { fontWeight: '600', fontSize: 13 },

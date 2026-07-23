@@ -7,12 +7,22 @@ const C = {
   textPrimary: "#FFFFFF", textSecondary: "#B8B8B8", accent: "#38BDF8", success: "#10B981", warning: "#F59E0B", danger: "#EF4444",
 };
 
+// Exact Figma Colors
 const CAT_COLORS: { [key: string]: string } = {
-  Food: '#38BDF8', Groceries: '#84CC16', Shopping: '#7F77DD', Entertainment: '#F59E0B', Bills: '#10B981', Transport: '#5DCAA5', Other: '#888780'
+  Food: '#38BDF8',
+  Shopping: '#A855F7',
+  Travel: '#2DD4BF',
+  Entertainment: '#F59E0B',
+  Bills: '#10B981',
+  Health: '#EF4444',
+  Groceries: '#84CC16',
+  Other: '#64748B'
 };
 
 export default function BudgetsScreen({ transactions }: { transactions: ParsedTransaction[] }) {
-  const [budgets, setBudgets] = useState({ Food: 3000, Groceries: 3000, Shopping: 5000, Transport: 1500, Entertainment: 1000, Bills: 2000, Other: 2000 });
+  const [budgets, setBudgets] = useState({
+    Food: 3000, Groceries: 3000, Shopping: 5000, Travel: 1500, Entertainment: 1000, Bills: 2000, Health: 1000, Other: 2000
+  });
   const [spent, setSpent] = useState<{[key: string]: number}>({});
 
   useEffect(() => {
@@ -28,22 +38,28 @@ export default function BudgetsScreen({ transactions }: { transactions: ParsedTr
   }, [transactions]);
 
   const totalSpent = Object.values(spent).reduce((a, b) => a + b, 0);
+  const monthName = new Date().toLocaleString('default', { month: 'long' });
 
   return (
     <ScrollView style={{ flex: 1, marginTop: 20 }} contentContainerStyle={{ paddingBottom: 100 }}>
       <Text style={styles.headerTitle}>Budgets</Text>
 
-      {/* Category Breakdown (Donut alternative using Stacked Bar) */}
+      {/* Category Breakdown */}
       <View style={[styles.glassCard, { padding: 22 }]}>
-        <Text style={styles.sectionLabel}>Expense categories</Text>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <Text style={styles.sectionLabel}>Category Breakdown</Text>
+          <Text style={styles.totalText}>{monthName} total · ₹{Math.round(totalSpent).toLocaleString('en-IN')}</Text>
+        </View>
+
         <View style={styles.stackedBar}>
           {Object.keys(spent).map((cat) => {
             const val = spent[cat] || 0;
             const pct = (val / totalSpent) * 100;
             if (pct === 0) return null;
-            return <View key={cat} style={{ width: `${pct}%`, height: 10, backgroundColor: CAT_COLORS[cat] || C.textSecondary, borderTopLeftRadius: cat === Object.keys(spent)[0] ? 5 : 0, borderBottomLeftRadius: cat === Object.keys(spent)[0] ? 5 : 0, borderTopRightRadius: cat === Object.keys(spent).pop() ? 5 : 0, borderBottomRightRadius: cat === Object.keys(spent).pop() ? 5 : 0 }} />;
+            return <View key={cat} style={{ width: `${pct}%`, height: 12, backgroundColor: CAT_COLORS[cat] || C.textSecondary }} />;
           })}
         </View>
+
         <View style={styles.legendContainer}>
           {Object.keys(spent).map((cat) => (
             <View key={cat} style={styles.legendRow}>
@@ -51,24 +67,27 @@ export default function BudgetsScreen({ transactions }: { transactions: ParsedTr
                 <View style={[styles.legendDot, { backgroundColor: CAT_COLORS[cat] || C.textSecondary }]} />
                 <Text style={styles.legendText}>{cat}</Text>
               </View>
-              <Text style={styles.legendValue}>{Math.round(((spent[cat] || 0) / totalSpent) * 100)}%</Text>
+              <Text style={styles.legendValue}>₹{Math.round(spent[cat] || 0).toLocaleString('en-IN')}</Text>
             </View>
           ))}
         </View>
       </View>
 
       {/* Budget Limits */}
-      <Text style={[styles.sectionLabel, { marginTop: 10 }]}>Monthly Limits</Text>
+      <Text style={[styles.sectionLabel, { marginTop: 16, marginBottom: 8 }]}>Monthly Limits</Text>
       {Object.keys(budgets).map(category => {
         const spentAmount = spent[category] || 0;
         const budgetAmount = budgets[category] || 1;
         const percent = Math.min(spentAmount / budgetAmount, 1);
-        const color = percent >= 0.9 ? C.danger : percent >= 0.7 ? C.warning : C.success;
+        const color = percent >= 0.9 ? C.danger : percent >= 0.7 ? C.warning : CAT_COLORS[category] || C.success;
 
         return (
           <View key={category} style={styles.budgetCard}>
             <View style={styles.cardHeader}>
-              <Text style={styles.categoryName}>{category}</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <View style={[styles.legendDot, { backgroundColor: CAT_COLORS[category] || C.textSecondary }]} />
+                <Text style={styles.categoryName}>{category}</Text>
+              </View>
               <TextInput
                 style={styles.budgetInput}
                 value={budgets[category].toString()}
@@ -76,7 +95,9 @@ export default function BudgetsScreen({ transactions }: { transactions: ParsedTr
                 keyboardType="numeric"
               />
             </View>
-            <Text style={[styles.spentText, { color }]}>Spent ₹{spentAmount.toFixed(0)} / ₹{budgetAmount}</Text>
+            <Text style={[styles.spentText, { color: percent >= 0.9 ? C.danger : percent >= 0.7 ? C.warning : C.success }]}>
+              Spent ₹{spentAmount.toFixed(0)} / ₹{budgetAmount}
+            </Text>
             <View style={styles.progressBackground}>
               <View style={[styles.progressBar, { width: `${percent * 100}%`, backgroundColor: color }]} />
             </View>
@@ -90,13 +111,14 @@ export default function BudgetsScreen({ transactions }: { transactions: ParsedTr
 const styles = StyleSheet.create({
   headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700', marginBottom: 20 },
   glassCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, borderRadius: 20, marginBottom: 16 },
-  sectionLabel: { color: C.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 16 },
-  stackedBar: { flexDirection: 'row', height: 10, borderRadius: 5, overflow: 'hidden', marginBottom: 16 },
+  sectionLabel: { color: C.textPrimary, fontSize: 16, fontWeight: '600' },
+  totalText: { color: C.textSecondary, fontSize: 13 },
+  stackedBar: { flexDirection: 'row', height: 12, borderRadius: 6, overflow: 'hidden', marginBottom: 20, backgroundColor: 'rgba(255,255,255,0.05)' },
   legendContainer: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between' },
-  legendRow: { flexDirection: 'row', justifyContent: 'space-between', width: '48%', marginBottom: 8 },
-  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 8 },
-  legendText: { color: C.textSecondary, fontSize: 13 },
-  legendValue: { color: C.textPrimary, fontSize: 13, fontWeight: '600' },
+  legendRow: { flexDirection: 'row', justifyContent: 'space-between', width: '48%', marginBottom: 12 },
+  legendDot: { width: 10, height: 10, borderRadius: 3, marginRight: 8 },
+  legendText: { color: C.textSecondary, fontSize: 14 },
+  legendValue: { color: C.textPrimary, fontSize: 14, fontWeight: '600' },
   budgetCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, padding: 16, borderRadius: 16, marginBottom: 12 },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   categoryName: { color: C.textPrimary, fontSize: 16, fontWeight: '600' },

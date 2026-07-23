@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar, Modal
+  Alert, NativeModules, FlatList, StatusBar
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore } from './src/lib/behavioralEngine';
@@ -9,16 +9,27 @@ import { UserBehaviorModel, UserLabel } from './src/lib/personalization';
 import { backfillHistory } from './src/lib/historicalSync';
 import BudgetsScreen from './src/screens/BudgetsScreen';
 import TransactionsScreen from './src/screens/TransactionsScreen';
+import AICoachScreen from './src/screens/AICoachScreen';
 import CircularScoreCard from './src/components/CircularScoreCard';
 import PremiumChart from './src/components/PremiumChart';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
 
+// Exact Figma Design Tokens
 const C = {
-  bg: "#080808", glass: "rgba(255,255,255,0.06)", glassStrong: "rgba(255,255,255,0.09)",
-  border: "rgba(255,255,255,0.12)", textPrimary: "#FFFFFF", textSecondary: "#B8B8B8",
-  accent: "#38BDF8", success: "#10B981", warning: "#F59E0B", danger: "#EF4444",
+  bg: "#080808",
+  glass: "rgba(255,255,255,0.07)",
+  glassStrong: "rgba(255,255,255,0.10)",
+  border: "rgba(255,255,255,0.13)",
+  borderStrong: "rgba(255,255,255,0.18)",
+  textPrimary: "#FFFFFF",
+  textSecondary: "#B8B8B8",
+  accent: "#38BDF8",
+  success: "#10B981",
+  warning: "#F59E0B",
+  danger: "#EF4444",
+  purple: "#8B5CF6"
 };
 
 const getScoreColor = (score: number, type: 'good' | 'bad') => {
@@ -31,13 +42,11 @@ export default function App() {
   const [hasPermission, setHasPermission] = useState<boolean>(false);
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
   const [scores, setScores] = useState({ discipline: 0, impulse: 0, volatility: 0, wellness: 0, savingsRate: 0 });
+
   const [mode, setMode] = useState<'strict' | 'liberal' | null>(null);
   const [worthItTxnIds, setWorthItTxnIds] = useState<string[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets' | 'coach'>('dashboard');
   const [activeDay, setActiveDay] = useState<number | null>(null);
-  const [showAnalytics, setShowAnalytics] = useState(false);
-  const [analyticsPeriod, setAnalyticsPeriod] = useState<'week' | '3m' | '6m' | '1y'>('week');
-  const [analyticsActiveDay, setAnalyticsActiveDay] = useState<number | null>(null);
 
   const [model] = useState(new UserBehaviorModel());
   const [userLabels, setUserLabels] = useState<UserLabel[]>([]);
@@ -80,16 +89,10 @@ export default function App() {
   const resetAppData = async () => {
     try {
       await SmsModule.saveData(STORAGE_KEY, JSON.stringify({}));
-      setMode(null);
-      setHasPermission(false);
-      setTransactions([]);
-      setUserLabels([]);
-      setLabeledTxnIds([]);
-      setWorthItTxnIds([]);
-      setScores({ discipline: 0, impulse: 0, volatility: 0, wellness: 0 });
-    } catch (e) {
-      console.warn("Failed to reset data", e);
-    }
+      setMode(null); setHasPermission(false); setTransactions([]); setUserLabels([]);
+      setLabeledTxnIds([]); setWorthItTxnIds([]);
+      setScores({ discipline: 0, impulse: 0, volatility: 0, wellness: 0, savingsRate: 0 });
+    } catch (e) {}
   };
 
   const checkPermission = async (saved?: any) => {
@@ -125,14 +128,13 @@ export default function App() {
       const impulse = calculateImpulseIndex(liberalTxns);
       const volatility = calculateVolatilityScore(debitTxns);
 
-      // Calculate Savings Rate for the current month
       const now = new Date();
       const monthlyDebit = debitTxns.filter(t => t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
       const monthlyCredit = parsedTxns.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
       const savingsRate = monthlyCredit > 0 ? Math.max(0, Math.min(100, ((monthlyCredit - monthlyDebit) / monthlyCredit) * 100)) : 0;
 
       const wellness = calculateWellnessScore(discipline, impulse, volatility);
-      setScores({ discipline, impulse, volatility, wellness });
+      setScores({ discipline, impulse, volatility, wellness, savingsRate });
 
       const existingLabels = saved?.userLabels;
       if (existingLabels && existingLabels.length > 0) {
@@ -156,18 +158,13 @@ export default function App() {
     return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
   }, [transactions]);
 
-  // Real Weekly Spending Calculation
   const weeklyData = useMemo(() => {
-    const spendByDay = [0, 0, 0, 0, 0, 0, 0]; // Sun to Sat
+    const spendByDay = [0, 0, 0, 0, 0, 0, 0];
     const now = new Date();
     transactions.forEach(t => {
       if (t.type === 'debit') {
-        const txnDate = new Date(t.date);
-        const diffTime = now.getTime() - txnDate.getTime();
-        const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays < 7) {
-          spendByDay[txnDate.getDay()] += t.amount;
-        }
+        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) spendByDay[t.date.getDay()] += t.amount;
       }
     });
     return [
@@ -177,55 +174,6 @@ export default function App() {
       { day: 'Sun', amount: spendByDay[0] },
     ];
   }, [transactions]);
-
-  // Aggregates data for the Analytics Modal based on selected time frame
-  const analyticsData = useMemo(() => {
-    const now = new Date();
-    const debitTxns = transactions.filter(t => t.type === 'debit');
-
-    if (analyticsPeriod === 'week') {
-      const spendByDay = [0, 0, 0, 0, 0, 0, 0];
-      debitTxns.forEach(t => {
-        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays < 7) spendByDay[t.date.getDay()] += t.amount;
-      });
-      return [
-        { day: 'Mon', amount: spendByDay[1] }, { day: 'Tue', amount: spendByDay[2] },
-        { day: 'Wed', amount: spendByDay[3] }, { day: 'Thu', amount: spendByDay[4] },
-        { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
-        { day: 'Sun', amount: spendByDay[0] },
-      ];
-    }
-
-    if (analyticsPeriod === '3m') {
-      const weeks = 12; // ~3 months
-      const data = Array(weeks).fill(0).map((_, i) => ({ day: `W${i+1}`, amount: 0 }));
-      debitTxns.forEach(t => {
-        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
-        const diffWeeks = Math.floor(diffDays / 7);
-        if (diffWeeks >= 0 && diffWeeks < weeks) data[weeks - 1 - diffWeeks].amount += t.amount;
-      });
-      return data;
-    }
-
-    // 6m and 1y (Group by Month)
-    const months = analyticsPeriod === '6m' ? 6 : 12;
-    const data = Array(months).fill(0).map((_, i) => {
-      const d = new Date(now.getFullYear(), now.getMonth() - (months - 1 - i), 1);
-      return { day: d.toLocaleString('default', { month: 'short' }), amount: 0, year: d.getFullYear(), month: d.getMonth() };
-    });
-
-    debitTxns.forEach(t => {
-      const tDate = t.date;
-      for (let i = 0; i < months; i++) {
-        if (tDate.getFullYear() === data[i].year && tDate.getMonth() === data[i].month) {
-          data[i].amount += t.amount;
-          break;
-        }
-      }
-    });
-    return data.map(d => ({ day: d.day, amount: d.amount }));
-  }, [transactions, analyticsPeriod]);
 
   const handleLabelTransaction = (txn: ParsedTransaction, isImpulsive: boolean) => {
     const features = model.extractFeatures(txn, avgAmount);
@@ -297,60 +245,34 @@ export default function App() {
                   <Text style={styles.greeting}>Welcome back</Text>
                   <Text style={styles.headerTitle}>Your money, decoded.</Text>
                 </View>
-                <View style={[styles.glassCard, { padding: 10, marginBottom: 0 }]}>
-                  <CircularScoreCard score={scores.wellness} label="Wellness" color={C.accent} size={100} />
-                </View>
+                <TouchableOpacity style={styles.syncPill} onPress={resetAppData}>
+                  <View style={styles.syncDot} />
+                  <Text style={styles.syncText}>Reset</Text>
+                </TouchableOpacity>
               </View>
 
-              <View style={[styles.glassCard, { padding: 16, borderColor: 'rgba(56,189,248,0.25)' }]}>
-                <Text style={styles.mlTitle}>✨ Personalized ML Engine</Text>
-                <Text style={styles.mlStatus}>
-                  {userLabels.length < 15 ? `Learning... ${userLabels.length}/15 labels needed` : `Active! Trained on ${userLabels.length} decisions`}
-                </Text>
-              </View>
-
-              {/* Financial Wellness Card */}
-              <View style={[styles.glassCard, { padding: 22, marginBottom: 16 }]}>
-                <Text style={[styles.sectionLabel, { marginBottom: 20 }]}>FINANCIAL WELLNESS</Text>
+              {/* Financial Wellness Card (Heavy Glass) */}
+              <View style={[styles.glassCardHeavy, { padding: 22, marginBottom: 16 }]}>
+                <Text style={[styles.cardHeaderTitle, { marginBottom: 20 }]}>FINANCIAL WELLNESS</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   <View style={{ marginRight: 20 }}>
                     <CircularScoreCard score={scores.wellness} label="Score" color={C.accent} size={110} />
                   </View>
-
                   <View style={{ flex: 1 }}>
-                    {/* Discipline Meter */}
                     <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}>
-                        <Text style={styles.meterLabel}>Discipline</Text>
-                        <Text style={styles.meterValue}>{scores.discipline}/100</Text>
-                      </View>
+                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline</Text><Text style={styles.meterValue}>{scores.discipline}/100</Text></View>
                       <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: C.success }]} /></View>
                     </View>
-
-                    {/* Impulse Meter */}
                     <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}>
-                        <Text style={styles.meterLabel}>Impulse Index</Text>
-                        <Text style={styles.meterValue}>{scores.impulse}/100</Text>
-                      </View>
+                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Impulse Index</Text><Text style={styles.meterValue}>{scores.impulse}/100</Text></View>
                       <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: C.warning }]} /></View>
                     </View>
-
-                    {/* Volatility Meter */}
                     <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}>
-                        <Text style={styles.meterLabel}>Volatility</Text>
-                        <Text style={styles.meterValue}>{scores.volatility}/100</Text>
-                      </View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: '#7F77DD' }]} /></View>
+                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Volatility</Text><Text style={styles.meterValue}>{scores.volatility}/100</Text></View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: C.purple }]} /></View>
                     </View>
-
-                    {/* Savings Rate Meter */}
                     <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}>
-                        <Text style={styles.meterLabel}>Savings Rate</Text>
-                        <Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text>
-                      </View>
+                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Savings Rate</Text><Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text></View>
                       <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: C.accent }]} /></View>
                     </View>
                   </View>
@@ -359,7 +281,7 @@ export default function App() {
 
               {/* Bar Chart */}
               <View style={[styles.glassCard, { padding: 22 }]}>
-                <Text style={styles.sectionLabel}>Weekly spending (Bars)</Text>
+                <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (BARS)</Text>
                 <View style={styles.chartContainer}>
                   {weeklyData.map((item, i) => {
                     const maxVal = Math.max(...weeklyData.map(d => Number(d.amount) || 0), 1);
@@ -385,13 +307,11 @@ export default function App() {
                 </View>
               </View>
 
-              {/* Area / Line Chart */}
-              <View style={[styles.glassCard, { padding: 22 }]}>
+              {/* Area Chart */}
+              <View style={[styles.glassCard, { padding: 22, marginTop: 16 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={styles.sectionLabel}>Weekly spending (Trend)</Text>
-                  <TouchableOpacity onPress={() => setShowAnalytics(true)}>
-                       <Text style={{ color: C.textSecondary, fontSize: 12 }}>View analytics</Text>
-                  </TouchableOpacity>
+                  <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (TREND)</Text>
+                  <Text style={styles.subtleText}>₹{Math.round(weeklyData.reduce((a,b) => a + b.amount, 0)).toLocaleString('en-IN')}</Text>
                 </View>
                 <PremiumChart data={weeklyData} activeDay={activeDay} setActiveDay={setActiveDay} />
               </View>
@@ -408,8 +328,10 @@ export default function App() {
           model={model}
           handleLabelTransaction={handleLabelTransaction}
         />
-      ) : (
+      ) : activeTab === 'budgets' ? (
         <BudgetsScreen transactions={transactions} />
+      ) : (
+        <AICoachScreen transactions={transactions} scores={scores} />
       )}
 
       <View style={styles.tabBar}>
@@ -422,116 +344,62 @@ export default function App() {
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('budgets')}>
           <Text style={[styles.tabText, activeTab === 'budgets' && styles.tabTextActive]}>Budgets</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('coach')}>
+          <Text style={[styles.tabText, activeTab === 'coach' && styles.tabTextActive]}>AI Coach</Text>
+        </TouchableOpacity>
       </View>
-
-      {/* Floating Reset Button for Testing */}
-      <TouchableOpacity style={styles.resetBtn} onPress={resetAppData}>
-        <Text style={styles.resetBtnText}>Reset</Text>
-      </TouchableOpacity>
-
-      {/* Analytics Modal */}
-      <Modal visible={showAnalytics} animationType="slide" transparent={true} onRequestClose={() => setShowAnalytics(false)}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Spending Analytics</Text>
-              <TouchableOpacity onPress={() => setShowAnalytics(false)}>
-                <Text style={styles.closeBtn}>✕</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Time Period Selector */}
-            <View style={styles.periodSelector}>
-              {[
-                { key: 'week', label: '1W' },
-                { key: '3m', label: '3M' },
-                { key: '6m', label: '6M' },
-                { key: '1y', label: '1Y' }
-              ].map(p => (
-                <TouchableOpacity
-                  key={p.key}
-                  style={[styles.periodBtn, analyticsPeriod === p.key && styles.periodBtnActive]}
-                  onPress={() => { setAnalyticsPeriod(p.key as any); setAnalyticsActiveDay(null); }}
-                >
-                  <Text style={[styles.periodBtnText, analyticsPeriod === p.key && styles.periodBtnTextActive]}>{p.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* The Dynamic Chart */}
-            <View style={{ marginTop: 20, alignItems: 'center' }}>
-              <PremiumChart data={analyticsData} activeDay={analyticsActiveDay} setActiveDay={setAnalyticsActiveDay} />
-            </View>
-
-          </View>
-        </View>
-      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 24, paddingTop: 50 },
+  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 50 },
   onboardingContent: { flex: 1, justifyContent: 'center' },
   logo: { color: C.textPrimary, fontSize: 32, fontWeight: 'bold', marginBottom: 20 },
   onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34 },
   onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 22 },
-  primaryButton: { backgroundColor: C.accent, padding: 18, borderRadius: 12, alignItems: 'center', marginBottom: 20 },
+  primaryButton: { backgroundColor: C.accent, padding: 18, borderRadius: 14, alignItems: 'center', marginBottom: 20 },
   primaryButtonText: { color: '#001018', fontSize: 16, fontWeight: 'bold' },
+
+  // Dashboard Header
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
-  greeting: { color: C.textSecondary, fontSize: 13.5, marginBottom: 4 },
-  headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700' },
-  glassCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, borderRadius: 20, marginBottom: 16 },
-  mlTitle: { color: C.accent, fontSize: 14, fontWeight: '600', marginBottom: 4 },
-  mlStatus: { color: C.textSecondary, fontSize: 13 },
-  sectionLabel: { color: C.textPrimary, fontSize: 15, fontWeight: '600', marginBottom: 16 },
-  meterContainer: { marginBottom: 16 },
+  greeting: { color: C.textSecondary, fontSize: 13, marginBottom: 4 },
+  headerTitle: { color: C.textPrimary, fontSize: 24, fontWeight: '700' },
+  syncPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  syncDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.success, marginRight: 6 },
+  syncText: { color: C.textSecondary, fontSize: 12, fontWeight: '600' },
+
+  // Glass Cards
+  glassCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, borderRadius: 20 },
+  glassCardHeavy: { backgroundColor: C.glassStrong, borderColor: C.borderStrong, borderWidth: 1, borderRadius: 24 },
+  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, marginBottom: 16 },
+  subtleText: { color: C.textSecondary, fontSize: 12 },
+
+  // Meters
+  meterContainer: { marginBottom: 14 },
   meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
   meterLabel: { color: C.textSecondary, fontSize: 12.5 },
   meterValue: { color: C.textPrimary, fontSize: 12.5, fontWeight: '600' },
-  meterBackground: { height: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.08)', overflow: 'hidden' },
+  meterBackground: { height: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
   meterFill: { height: '100%', borderRadius: 999 },
+
+  // Charts
   chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 140, alignItems: 'flex-end', marginTop: 20 },
   chartBarWrapper: { alignItems: 'center', width: 38, height: '100%', justifyContent: 'flex-end' },
-  barTooltip: {
-    position: 'absolute',
-    top: -10,
-    backgroundColor: C.accent,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    zIndex: 10,
-    minWidth: 50, // Force it to be wider
-    left: -6, // Center it over the bar
-    alignItems: 'center'
-  },
-  barTooltipText: {
-    color: '#001018',
-    fontSize: 11,
-    fontWeight: 'bold',
-    flexWrap: 'nowrap' // Prevent text from wrapping to the next line
-  },
+  barTooltip: { position: 'absolute', top: 0, backgroundColor: C.accent, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, zIndex: 10, minWidth: 50, left: -6, alignItems: 'center' },
+  barTooltipText: { color: '#001018', fontSize: 11, fontWeight: 'bold', flexWrap: 'nowrap' },
   chartBarBg: { width: 14, height: '75%', justifyContent: 'flex-end' },
   chartBarFill: { width: '100%' },
-  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 6 },  modeCard: { backgroundColor: C.glass, borderWidth: 2, padding: 20, borderRadius: 16, marginBottom: 16 },
+  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 6 },
+
+  // Mode Selection
+  modeCard: { backgroundColor: C.glass, borderWidth: 2, padding: 20, borderRadius: 18, marginBottom: 16 },
   modeTitle: { color: C.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
   modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20 },
+
+  // Tab Bar
   tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70, backgroundColor: 'rgba(8,8,8,0.9)', flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  tabText: { color: C.textSecondary, fontSize: 14, fontWeight: '600' },
-  tabTextActive: { color: C.accent },
-  resetBtn: { position: 'absolute', top: 50, right: 24, backgroundColor: 'rgba(239,68,68,0.2)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(239,68,68,0.5)' },
-  resetBtnText: { color: C.danger, fontSize: 12, fontWeight: 'bold' },
-
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, height: '60%', borderWidth: 1, borderColor: C.border },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { color: C.textPrimary, fontSize: 20, fontWeight: 'bold' },
-  closeBtn: { color: C.textSecondary, fontSize: 18, padding: 8 },
-  periodSelector: { flexDirection: 'row', backgroundColor: C.glass, borderRadius: 12, padding: 4 },
-  periodBtn: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  periodBtnActive: { backgroundColor: C.accent },
-  periodBtnText: { color: C.textSecondary, fontSize: 14, fontWeight: '600' },
-  periodBtnTextActive: { color: '#001018', fontWeight: 'bold' }
+  tabText: { color: C.textSecondary, fontSize: 13, fontWeight: '600' },
+  tabTextActive: { color: C.accent }
 });
