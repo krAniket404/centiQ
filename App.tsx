@@ -312,8 +312,8 @@ export default function App() {
                     <CircularScoreCard score={scores.wellness} label="Score" color={getDynamicScoreColor(scores.wellness, 'higher_is_better')} size={100} />
                   </View>
 
-                  {/* Right Side: Meters */}
-                  <View style={{ flex: 1, height: 100, justifyContent: 'space-evenly' }}>
+                  {/* Right Side: Meters (Removed fixed height to prevent overlap) */}
+                  <View style={{ flex: 1, justifyContent: 'center' }}>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline</Text><Text style={styles.meterValue}>{scores.discipline}/100</Text></View>
                       <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: getDynamicScoreColor(scores.discipline, 'higher_is_better') }]} /></View>
@@ -334,30 +334,42 @@ export default function App() {
                 </View>
               </View>
 
-              {/* Digital Subscriptions Card */}
-              {recurringCharges.knownSubscriptions.length > 0 && (
-                <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(56,189,248,0.25)' }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>🎬 SUBSCRIPTIONS</Text>
+              {/* Digital Subscriptions Card (Always Visible) */}
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(56,189,248,0.25)' }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>🎬 SUBSCRIPTIONS</Text>
+                  {recurringCharges.knownSubscriptions.length > 0 && (
                     <Text style={{ color: C.accent, fontSize: 14, fontWeight: 'bold' }}>₹{recurringCharges.totalSubsCost.toLocaleString('en-IN')}/mo</Text>
-                  </View>
-                  <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
-                    You have {recurringCharges.knownSubscriptions.length} active digital subscriptions.
-                  </Text>
-
-                  {recurringCharges.knownSubscriptions.map((l, i) => (
-                    <View key={i} style={styles.leakRow}>
-                      <View>
-                        <Text style={styles.leakMerchant}>{l.merchant}</Text>
-                        <Text style={styles.leakCount}>Charged {l.count} times</Text>
-                      </View>
-                      <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
-                    </View>
-                  ))}
+                  )}
                 </View>
-              )}
 
-              {/* Repetitive Payments Card */}
+                {recurringCharges.knownSubscriptions.length === 0 ? (
+                  <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                    <Text style={{ fontSize: 28, marginBottom: 8 }}>🎉</Text>
+                    <Text style={{ color: C.success, fontSize: 14, fontWeight: 'bold', marginBottom: 6 }}>NO SUBSCRIPTION LEAKS</Text>
+                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 18 }}>
+                      Great job! We didn't find any sneaky digital subscriptions in your history. Keep it up!
+                    </Text>
+                  </View>
+                ) : (
+                  <>
+                    <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+                      You have {recurringCharges.knownSubscriptions.length} active digital subscriptions.
+                    </Text>
+                    {recurringCharges.knownSubscriptions.map((l, i) => (
+                      <View key={i} style={styles.leakRow}>
+                        <View>
+                          <Text style={styles.leakMerchant}>{l.merchant}</Text>
+                          <Text style={styles.leakCount}>Charged {l.count} times</Text>
+                        </View>
+                        <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
+                      </View>
+                    ))}
+                  </>
+                )}
+              </View>
+
+              {/* Repetitive Payments Card (Only if they exist) */}
               {recurringCharges.repetitivePayments.length > 0 && (
                 <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(245,158,11,0.25)' }]}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
