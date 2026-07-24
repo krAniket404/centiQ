@@ -1,4 +1,5 @@
 import { ParsedTransaction } from './smsParser';
+import { isKnownSubscription } from './subscriptionList';
 
 // JPMorgan Chase Institute CV boundaries shifted down by 15%
 const CV_BOUNDARIES = {
@@ -113,22 +114,48 @@ export function calculateWellnessScore(discipline: number, impulse: number, vola
   return Math.round((discipline * (1/3)) + ((100 - impulse) * (1/3)) + ((100 - volatility) * (1/3)));
 }
 
-// Detect subscription leaks (same amount, same merchant, 3+ times)
-export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): ParsedTransaction[] {
+// --- SUBSCRIPTION & REPETITIVE PAYMENT DETECTION ---
+
+export interface RecurringCharge {
+  merchant: string;
+  amount: number;
+  count: number;
+}
+
+export interface SubscriptionResult {
+  knownSubscriptions: RecurringCharge[];
+  repetitivePayments: RecurringCharge[];
+}
+
+export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): SubscriptionResult {
   const recurringMap: { [key: string]: ParsedTransaction[] } = {};
 
+  // Group transactions by merchant + amount
   transactions.filter(t => t.type === 'debit').forEach(t => {
     const key = `${t.merchant}-${t.amount}`;
     if (!recurringMap[key]) recurringMap[key] = [];
     recurringMap[key].push(t);
   });
 
-  const leaks: ParsedTransaction[] = [];
+  const knownSubs: RecurringCharge[] = [];
+  const repetitivePays: RecurringCharge[] = [];
+
+  // Split them based on the known list
   Object.values(recurringMap).forEach(group => {
-    if (group.length >= 3) {
-      leaks.push(...group);
+    if (group.length >= 3) { // 3 or more identical charges = recurring
+      const charge = {
+        merchant: group[0].merchant,
+        amount: group[0].amount,
+        count: group.length
+      };
+
+      if (isKnownSubscription(charge.merchant)) {
+        knownSubs.push(charge);
+      } else {
+        repetitivePays.push(charge);
+      }
     }
   });
 
-  return leaks;
+  return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays };
 }

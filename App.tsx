@@ -4,18 +4,19 @@ import {
   Alert, NativeModules, FlatList, StatusBar
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
-import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore } from './src/lib/behavioralEngine';
+import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
 import { UserBehaviorModel, UserLabel } from './src/lib/personalization';
 import { backfillHistory } from './src/lib/historicalSync';
 import BudgetsScreen from './src/screens/BudgetsScreen';
 import TransactionsScreen from './src/screens/TransactionsScreen';
 import AICoachScreen from './src/screens/AICoachScreen';
+import SettingsScreen from './src/screens/SettingsScreen';
 import CircularScoreCard from './src/components/CircularScoreCard';
 import PremiumChart from './src/components/PremiumChart';
 import { supabase } from './src/lib/supabase';
 import AuthScreen from './src/screens/AuthScreen';
 import { Session } from '@supabase/supabase-js';
-import SettingsScreen from './src/screens/SettingsScreen';
+import { getScoreColor as getDynamicScoreColor } from './src/theme/scoreColor';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -36,12 +37,6 @@ const C = {
   purple: "#8B5CF6"
 };
 
-const getScoreColor = (score: number, type: 'good' | 'bad') => {
-  if (type === 'good') return score >= 70 ? C.success : score >= 40 ? C.warning : C.danger;
-  if (type === 'bad') return score >= 70 ? C.danger : score >= 40 ? C.warning : C.success;
-  return C.textPrimary;
-};
-
 export default function App() {
   const [hasPermission, setHasPermission] = useState<boolean>(false);
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
@@ -57,14 +52,13 @@ export default function App() {
   const [labeledTxnIds, setLabeledTxnIds] = useState<string[]>([]);
 
   const savedStateRef = useRef<any>(null);
-
   const [session, setSession] = useState<Session | null>(null);
 
+  // --- ALL HOOKS MUST BE HERE, AT THE TOP LEVEL ---
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
     });
-
     supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
     });
@@ -79,6 +73,40 @@ export default function App() {
     init();
   }, []);
 
+  const avgAmount = useMemo(() => {
+    if (transactions.length === 0) return 0;
+    return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
+  }, [transactions]);
+
+  const weeklyData = useMemo(() => {
+    const spendByDay = [0, 0, 0, 0, 0, 0, 0];
+    const now = new Date();
+    transactions.forEach(t => {
+      if (t.type === 'debit') {
+        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
+        if (diffDays >= 0 && diffDays < 7) spendByDay[t.date.getDay()] += t.amount;
+      }
+    });
+    return [
+      { day: 'Mon', amount: spendByDay[1] }, { day: 'Tue', amount: spendByDay[2] },
+      { day: 'Wed', amount: spendByDay[3] }, { day: 'Thu', amount: spendByDay[4] },
+      { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
+      { day: 'Sun', amount: spendByDay[0] },
+    ];
+  }, [transactions]);
+
+  const recurringCharges = useMemo(() => {
+    const result = detectSubscriptionLeaks(transactions) || { knownSubscriptions: [], repetitivePayments: [] };
+    const knownSubs = result.knownSubscriptions || [];
+    const repetitivePays = result.repetitivePayments || [];
+
+    const totalSubsCost = knownSubs.reduce((sum: number, l: any) => sum + l.amount, 0);
+    const totalRepetitiveCost = repetitivePays.reduce((sum: number, l: any) => sum + l.amount, 0);
+
+    return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays, totalSubsCost, totalRepetitiveCost };
+  }, [transactions]);
+
+  // --- FUNCTIONS START HERE ---
   const loadSavedData = async () => {
     try {
       const raw = await SmsModule.loadData(STORAGE_KEY);
@@ -171,9 +199,7 @@ export default function App() {
   };
 
   const syncToCloud = async (txns: ParsedTransaction[]) => {
-    // If login is bypassed, we use a mock user ID for testing
     const userId = session?.user?.id || '00000000-0000-0000-0000-000000000000';
-
     const payload = txns.map(t => ({
       user_id: userId,
       amount: t.amount,
@@ -184,7 +210,6 @@ export default function App() {
     }));
 
     try {
-      // Upload to Supabase (ignoring duplicates)
       const { error } = await supabase
         .from('transactions')
         .upsert(payload, { onConflict: 'user_id, txn_date, amount, merchant' });
@@ -195,28 +220,6 @@ export default function App() {
       console.warn('Failed to sync to cloud', e);
     }
   };
-
-  const avgAmount = useMemo(() => {
-    if (transactions.length === 0) return 0;
-    return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
-  }, [transactions]);
-
-  const weeklyData = useMemo(() => {
-    const spendByDay = [0, 0, 0, 0, 0, 0, 0];
-    const now = new Date();
-    transactions.forEach(t => {
-      if (t.type === 'debit') {
-        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays < 7) spendByDay[t.date.getDay()] += t.amount;
-      }
-    });
-    return [
-      { day: 'Mon', amount: spendByDay[1] }, { day: 'Tue', amount: spendByDay[2] },
-      { day: 'Wed', amount: spendByDay[3] }, { day: 'Thu', amount: spendByDay[4] },
-      { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
-      { day: 'Sun', amount: spendByDay[0] },
-    ];
-  }, [transactions]);
 
   const handleLabelTransaction = (txn: ParsedTransaction, isImpulsive: boolean) => {
     const features = model.extractFeatures(txn, avgAmount);
@@ -235,10 +238,11 @@ export default function App() {
     setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
     saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
   };
-  //Temporary Login bypass
-  //if(!session){
-  //    return <AuthScreen/> ;
-  //    }
+
+  // TEMPORARILY BYPASS LOGIN TO TEST THE APP
+  // if (!session) {
+  //   return <AuthScreen />;
+  // }
 
   if (!hasPermission) {
     return (
@@ -301,30 +305,80 @@ export default function App() {
               {/* Financial Wellness Card (Heavy Glass) */}
               <View style={[styles.glassCardHeavy, { padding: 22, marginBottom: 16 }]}>
                 <Text style={[styles.cardHeaderTitle, { marginBottom: 20 }]}>FINANCIAL WELLNESS</Text>
+
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  <View style={{ marginRight: 20 }}>
-                    <CircularScoreCard score={scores.wellness} label="Score" color={C.accent} size={110} />
+                  {/* Left Side: Circle */}
+                  <View style={{ width: 100, height: 100, justifyContent: 'center', alignItems: 'center', marginRight: 20 }}>
+                    <CircularScoreCard score={scores.wellness} label="Score" color={getDynamicScoreColor(scores.wellness, 'higher_is_better')} size={100} />
                   </View>
-                  <View style={{ flex: 1 }}>
+
+                  {/* Right Side: Meters */}
+                  <View style={{ flex: 1, height: 100, justifyContent: 'space-evenly' }}>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline</Text><Text style={styles.meterValue}>{scores.discipline}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: C.success }]} /></View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: getDynamicScoreColor(scores.discipline, 'higher_is_better') }]} /></View>
                     </View>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Impulse Index</Text><Text style={styles.meterValue}>{scores.impulse}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: C.warning }]} /></View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: getDynamicScoreColor(scores.impulse, 'lower_is_better') }]} /></View>
                     </View>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Volatility</Text><Text style={styles.meterValue}>{scores.volatility}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: C.purple }]} /></View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: getDynamicScoreColor(scores.volatility, 'lower_is_better') }]} /></View>
                     </View>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Savings Rate</Text><Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: C.accent }]} /></View>
+                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: getDynamicScoreColor(scores.savingsRate, 'higher_is_better') }]} /></View>
                     </View>
                   </View>
                 </View>
               </View>
+
+              {/* Digital Subscriptions Card */}
+              {recurringCharges.knownSubscriptions.length > 0 && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(56,189,248,0.25)' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>🎬 SUBSCRIPTIONS</Text>
+                    <Text style={{ color: C.accent, fontSize: 14, fontWeight: 'bold' }}>₹{recurringCharges.totalSubsCost.toLocaleString('en-IN')}/mo</Text>
+                  </View>
+                  <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+                    You have {recurringCharges.knownSubscriptions.length} active digital subscriptions.
+                  </Text>
+
+                  {recurringCharges.knownSubscriptions.map((l, i) => (
+                    <View key={i} style={styles.leakRow}>
+                      <View>
+                        <Text style={styles.leakMerchant}>{l.merchant}</Text>
+                        <Text style={styles.leakCount}>Charged {l.count} times</Text>
+                      </View>
+                      <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Repetitive Payments Card */}
+              {recurringCharges.repetitivePayments.length > 0 && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(245,158,11,0.25)' }]}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.warning }]}>⚠️ REPETITIVE PAYMENTS</Text>
+                    <Text style={{ color: C.warning, fontSize: 14, fontWeight: 'bold' }}>₹{recurringCharges.totalRepetitiveCost.toLocaleString('en-IN')}/mo</Text>
+                  </View>
+                  <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+                    We detected {recurringCharges.repetitivePayments.length} recurring charges (bills, rent, gyms, etc).
+                  </Text>
+
+                  {recurringCharges.repetitivePayments.map((l, i) => (
+                    <View key={i} style={styles.leakRow}>
+                      <View>
+                        <Text style={styles.leakMerchant}>{l.merchant}</Text>
+                        <Text style={styles.leakCount}>Charged {l.count} times</Text>
+                      </View>
+                      <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
 
               {/* Bar Chart */}
               <View style={[styles.glassCard, { padding: 22 }]}>
@@ -388,24 +442,33 @@ export default function App() {
         />
       )}
 
+      {/* Tab Bar */}
       <View style={styles.tabBar}>
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('dashboard')}>
-          <Text style={[styles.tabText, activeTab === 'dashboard' && styles.tabTextActive]}>Dashboard</Text>
+          <Text style={[styles.tabIcon, activeTab === 'dashboard' && styles.tabIconActive]}>◉</Text>
+          <Text style={[styles.tabLabel, activeTab === 'dashboard' && styles.tabLabelActive]}>Dashboard</Text>
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('transactions')}>
-          <Text style={[styles.tabText, activeTab === 'transactions' && styles.tabTextActive]}>Transactions</Text>
+          <Text style={[styles.tabIcon, activeTab === 'transactions' && styles.tabIconActive]}>≣</Text>
+          <Text style={[styles.tabLabel, activeTab === 'transactions' && styles.tabLabelActive]}>Transactions</Text>
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('budgets')}>
-          <Text style={[styles.tabText, activeTab === 'budgets' && styles.tabTextActive]}>Budgets</Text>
+          <Text style={[styles.tabIcon, activeTab === 'budgets' && styles.tabIconActive]}>◍</Text>
+          <Text style={[styles.tabLabel, activeTab === 'budgets' && styles.tabLabelActive]}>Budgets</Text>
         </TouchableOpacity>
+
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('coach')}>
-          <Text style={[styles.tabText, activeTab === 'coach' && styles.tabTextActive]}>AI Coach</Text>
+          <Text style={[styles.tabIcon, activeTab === 'coach' && styles.tabIconActive]}>✦</Text>
+          <Text style={[styles.tabLabel, activeTab === 'coach' && styles.tabLabelActive]}>AI Coach</Text>
         </TouchableOpacity>
-        {/* ADD THIS NEW BUTTON */}
+
         <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('settings')}>
-          <Text style={[styles.tabText, activeTab === 'settings' && styles.tabTextActive]}>Settings</Text>
+          <Text style={[styles.tabIcon, activeTab === 'settings' && styles.tabIconActive]}>☰</Text>
+          <Text style={[styles.tabLabel, activeTab === 'settings' && styles.tabLabelActive]}>Settings</Text>
         </TouchableOpacity>
-      </View>      
+      </View>
     </View>
   );
 }
@@ -441,6 +504,12 @@ const styles = StyleSheet.create({
   meterBackground: { height: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
   meterFill: { height: '100%', borderRadius: 999 },
 
+  // Subscription Leaks
+  leakRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  leakMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '500' },
+  leakCount: { color: C.textSecondary, fontSize: 11, marginTop: 2 },
+  leakAmount: { color: C.textPrimary, fontSize: 15, fontWeight: 'bold' },
+
   // Charts
   chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 140, alignItems: 'flex-end', marginTop: 20 },
   chartBarWrapper: { alignItems: 'center', width: 38, height: '100%', justifyContent: 'flex-end' },
@@ -456,8 +525,10 @@ const styles = StyleSheet.create({
   modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20 },
 
   // Tab Bar
-  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 70, backgroundColor: 'rgba(8,8,8,0.9)', flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border },
-  tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  tabText: { color: C.textSecondary, fontSize: 13, fontWeight: '600' },
-  tabTextActive: { color: C.accent }
+  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 76, backgroundColor: 'rgba(8,8,8,0.95)', flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border, paddingBottom: 15 },
+  tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 4 },
+  tabIcon: { color: C.textSecondary, fontSize: 22 },
+  tabIconActive: { color: C.accent, fontSize: 24 },
+  tabLabel: { color: 'transparent', fontSize: 10, fontWeight: '600', height: 12 },
+  tabLabelActive: { color: C.accent, fontWeight: 'bold' },
 });

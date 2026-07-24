@@ -26,7 +26,13 @@ export default function CircularScoreCard({ score, label, color, size = 120 }: C
               {
                 width: size, height: size, borderRadius: size / 2, borderWidth: strokeWidth, borderColor: color,
                 top: 0,
-                transform: [{ rotate: score > 50 ? '180deg' : `${(score / 100) * 360}deg` }]
+                transform: [{ rotate: score > 50 ? '180deg' : `${(score / 100) * 360}deg` }],
+                // NEON GLOW PROPERTIES ADDED HERE
+                shadowColor: color,
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.8,
+                shadowRadius: 8,
+                elevation: 8,
               }
             ]}
           />
@@ -40,7 +46,13 @@ export default function CircularScoreCard({ score, label, color, size = 120 }: C
                 {
                   width: size, height: size, borderRadius: size / 2, borderWidth: strokeWidth, borderColor: color,
                   top: -size / 2,
-                  transform: [{ rotate: `${((score - 50) / 100) * 360}deg` }]
+                  transform: [{ rotate: `${((score - 50) / 100) * 360}deg` }],
+                  // NEON GLOW PROPERTIES ADDED HERE
+                  shadowColor: color,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 8,
+                  elevation: 8,
                 }
               ]}
             />
@@ -57,7 +69,7 @@ export default function CircularScoreCard({ score, label, color, size = 120 }: C
 }
 
 const styles = StyleSheet.create({
-  container: { alignItems: 'center' },
+  container: { alignItems: 'center', alignSelf: 'center' },
   circleWrapper: { justifyContent: 'center', alignItems: 'center', position: 'relative' },
   ring: { position: 'absolute' },
   halfCircleContainer: { position: 'absolute', overflow: 'hidden', left: 0 },
