@@ -18,6 +18,7 @@ import AuthScreen from './src/screens/AuthScreen';
 import { Session } from '@supabase/supabase-js';
 import { getScoreColor as getDynamicScoreColor } from './src/theme/scoreColor';
 
+
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
 
