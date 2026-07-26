@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar
+  Alert, NativeModules, FlatList, StatusBar, AppState
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
@@ -73,6 +73,43 @@ export default function App() {
     };
     init();
   }, []);
+
+  // Check for notification button clicks when app opens
+  useEffect(() => {
+    const checkPendingNotif = async () => {
+      try {
+        const result = await SmsModule.getPendingNotifLabel();
+        if (result.status === 'found' && transactions.length > 0) {
+          // Find the most recent debit transaction
+          const recentTxn = transactions.find(t => t.type === 'debit');
+          if (recentTxn) {
+            const isImpulsive = result.isImpulsive;
+            handleLabelTransaction(recentTxn, isImpulsive);
+            Alert.alert(
+              "Model Updated",
+              `Your latest transaction was logged as ${isImpulsive ? 'Impulsive' : 'Worth It'} from the notification.`
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to check pending notif", e);
+      }
+    };
+
+    // Run when app opens
+    checkPendingNotif();
+
+    // Run when app returns to foreground
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        checkPendingNotif();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [transactions]);
 
   const avgAmount = useMemo(() => {
     if (transactions.length === 0) return 0;
@@ -147,12 +184,22 @@ export default function App() {
 
   const requestPermission = async () => {
     try {
-      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.READ_SMS, {
-        title: "CentiQ Behavioral Access", message: "CentiQ analyzes your transaction SMS to show you WHY you spend.",
-        buttonNeutral: "Ask Me Later", buttonNegative: "Exit App", buttonPositive: "Grant Access"
-      });
-      if (granted === PermissionsAndroid.RESULTS.GRANTED) { setHasPermission(true); fetchSMS(savedStateRef.current); }
-      else { Alert.alert("Permission Denied", "CentiQ cannot function without SMS access. Exiting."); setTimeout(() => BackHandler.exitApp(), 1500); }
+      // Ask for both READ and RECEIVE permissions
+      const granted = await PermissionsAndroid.requestMultiple([
+        PermissionsAndroid.PERMISSIONS.READ_SMS,
+        PermissionsAndroid.PERMISSIONS.RECEIVE_SMS
+      ]);
+
+      if (
+        granted[PermissionsAndroid.PERMISSIONS.READ_SMS] === PermissionsAndroid.RESULTS.GRANTED &&
+        granted[PermissionsAndroid.PERMISSIONS.RECEIVE_SMS] === PermissionsAndroid.RESULTS.GRANTED
+      ) {
+        setHasPermission(true);
+        fetchSMS(savedStateRef.current);
+      } else {
+        Alert.alert("Permission Denied", "CentiQ cannot function without SMS access. Exiting.");
+        setTimeout(() => BackHandler.exitApp(), 1500);
+      }
     } catch (err) {}
   };
 

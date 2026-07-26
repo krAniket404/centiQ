@@ -104,6 +104,33 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
         }.start()
     }
 
+
+    @ReactMethod
+    fun getPendingNotifLabel(promise: Promise) {
+        try {
+            val prefs = reactApplicationContext.getSharedPreferences("centiq_notif_data", Context.MODE_PRIVATE)
+            val hasPending = prefs.getBoolean("has_pending_label", false)
+            val isImpulsive = prefs.getBoolean("pending_label_value", false)
+
+            if (hasPending) {
+                // Clear the flag so we don't read it twice
+                prefs.edit().remove("has_pending_label").remove("pending_label_value").apply()
+
+                val map = Arguments.createMap()
+                map.putString("status", "found")
+                map.putBoolean("isImpulsive", isImpulsive)
+                promise.resolve(map)
+            } else {
+                val map = Arguments.createMap()
+                map.putString("status", "empty")
+                promise.resolve(map)
+            }
+        } catch (e: Exception) {
+            promise.reject("NOTIF_READ_ERROR", e)
+        }
+    }
+
+
     @ReactMethod
     fun saveData(key: String, value: String, promise: Promise) {
         try {
