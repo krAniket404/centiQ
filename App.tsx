@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar, AppState
+  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
@@ -39,6 +39,13 @@ const C = {
 };
 
 export default function App() {
+  const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
+  const [showBriefing, setShowBriefing] = useState(false);
+  const [isFetchingBriefing, setIsFetchingBriefing] = useState(false);
+
+  // PASTE YOUR GEMINI API KEY HERE
+  const API_KEY = 'YOUR_GEMINI_API_KEY';
+
   const [hasPermission, setHasPermission] = useState<boolean>(false);
   const [transactions, setTransactions] = useState<ParsedTransaction[]>([]);
   const [scores, setScores] = useState({ discipline: 0, impulse: 0, volatility: 0, wellness: 0, savingsRate: 0 });
@@ -99,6 +106,21 @@ export default function App() {
     // Run when app opens
     checkPendingNotif();
 
+  const handleShareScore = async () => {
+    const profileTag = scores.impulse > 60 ? 'Impulsive Planner' : 'Disciplined Saver';
+
+    const shareMessage = `My CentiQ Financial Wellness Score is ${scores.wellness}/100! 🧠💸\n\nI'm officially an "${profileTag}".\n\nCentiQ analyzes my SMS to explain WHY I spend money, not just where it goes. Stop just tracking expenses, start decoding your behavior. 🚀\n\n#CentiQ #BehavioralFinance`;
+
+    try {
+      const result = await Share.share({
+        message: shareMessage,
+        title: 'My CentiQ Wellness Score',
+      });
+    } catch (error: any) {
+      Alert.alert('Error', error.message);
+    }
+  };
+
     // Run when app returns to foreground
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
@@ -110,6 +132,30 @@ export default function App() {
       subscription.remove();
     };
   }, [transactions]);
+
+  useEffect(() => {
+    const checkDailyBriefing = async () => {
+      try {
+        const lastShownDate = await SmsModule.loadData('last_briefing_date');
+        const today = new Date().toDateString();
+
+        if (lastShownDate !== today && transactions.length > 0) {
+          // It's a new day! Fetch the briefing.
+          setIsFetchingBriefing(true);
+          setShowBriefing(true); // Show the modal immediately with a loading spinner
+          await fetchMorningBriefing();
+          await SmsModule.saveData('last_briefing_date', today);
+        }
+      } catch (e) {
+        console.warn("Briefing check failed", e);
+      }
+    };
+
+    // Only run if user has transactions and is past onboarding
+    if (hasPermission && mode) {
+      checkDailyBriefing();
+    }
+  }, [hasPermission, mode, transactions]);
 
   const avgAmount = useMemo(() => {
     if (transactions.length === 0) return 0;
@@ -142,6 +188,66 @@ export default function App() {
     const totalRepetitiveCost = repetitivePays.reduce((sum: number, l: any) => sum + l.amount, 0);
 
     return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays, totalSubsCost, totalRepetitiveCost };
+  }, [transactions]);
+
+  // Generate Real-Time Behavioral Insights
+  const behaviorFeed = useMemo(() => {
+    const insights: { icon: string; title: string; text: string; color: string }[] = [];
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+
+    // 1. Weekend Spending Insight
+    const weekendTxns = debitTxns.filter(t => t.date.getDay() === 0 || t.date.getDay() === 6);
+    const weekendSpend = weekendTxns.reduce((a, b) => a + b.amount, 0);
+    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+    if (totalSpend > 0 && weekendSpend / totalSpend > 0.4) {
+      insights.push({
+        icon: 'calendar',
+        title: 'WEEKEND WARRIOR',
+        text: `You spend ${Math.round((weekendSpend / totalSpend) * 100)}% of your money on weekends. Watch out for impulse food delivery!`,
+        color: C.warning
+      });
+    }
+
+    // 2. Late Night Cravings Insight
+    const lateNightTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4);
+    if (lateNightTxns.length > 2) {
+      insights.push({
+        icon: 'moon',
+        title: 'LATE NIGHT CRAVINGS',
+        text: `We detected ${lateNightTxns.length} transactions between 10 PM and 4 AM. These are highly likely to be impulsive.`,
+        color: C.purple
+      });
+    }
+
+    // 3. Top Category Insight
+    const catTotals: { [key: string]: number } = {};
+    debitTxns.forEach(t => {
+      const cat = t.category || 'Other';
+      catTotals[cat] = (catTotals[cat] || 0) + t.amount;
+    });
+    const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
+    if (topCat && catTotals[topCat] > 0) {
+      insights.push({
+        icon: 'tag',
+        title: 'TOP CATEGORY',
+        text: `${topCat} is your highest spending category at ₹${Math.round(catTotals[topCat]).toLocaleString('en-IN')}. Consider setting a budget for this.`,
+        color: C.accent
+      });
+    }
+
+    // 4. High Value Transaction Insight
+    const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
+    const highValueTxns = debitTxns.filter(t => t.amount > avgAmt * 3);
+    if (highValueTxns.length > 0) {
+      insights.push({
+        icon: 'alert',
+        title: 'UNUSUAL SPENDING',
+        text: `You made ${highValueTxns.length} transactions significantly larger than your average of ₹${Math.round(avgAmt)}.`,
+        color: C.danger
+      });
+    }
+
+    return insights;
   }, [transactions]);
 
   // --- FUNCTIONS START HERE ---
@@ -201,6 +307,47 @@ export default function App() {
         setTimeout(() => BackHandler.exitApp(), 1500);
       }
     } catch (err) {}
+  };
+
+  const fetchMorningBriefing = async () => {
+    try {
+      const now = new Date();
+      const last24Hours = transactions.filter(t => {
+        const diff = now.getTime() - t.date.getTime();
+        return diff < (24 * 60 * 60 * 1000);
+      });
+
+      const txnsSummary = last24Hours.map(t =>
+        `${t.type === 'credit' ? 'Income' : 'Spent'} ₹${t.amount} at ${t.merchant || t.bank} (${t.category || 'Other'})`
+      ).join(', ');
+
+      const prompt = `
+        You are a Gen-Z behavioral finance coach. Generate a 2-sentence proactive morning briefing.
+        Sentence 1: A brief, encouraging good morning greeting acknowledging their financial wellness score (${scores.wellness}/100).
+        Sentence 2: One actionable insight based on their last 24 hours of spending (Transactions: ${txnsSummary || 'No spending in the last 24 hours.'}).
+        Keep it under 40 words. Do not use markdown or hashtags.
+      `;
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          generationConfig: { maxOutputTokens: 100 }
+        })
+      });
+
+      const data = await response.json();
+      if (data.candidates && data.candidates[0].content) {
+        setMorningBriefing(data.candidates[0].content.parts[0].text);
+      } else {
+        setMorningBriefing("Good morning! Ready to make some smart financial moves today?");
+      }
+    } catch (e) {
+      setMorningBriefing("Good morning! Ready to make some smart financial moves today?");
+    } finally {
+      setIsFetchingBriefing(false);
+    }
   };
 
   const fetchSMS = async (saved?: any) => {
@@ -344,10 +491,18 @@ export default function App() {
                   <Text style={styles.greeting}>Welcome back</Text>
                   <Text style={styles.headerTitle}>Your money, decoded.</Text>
                 </View>
-                <TouchableOpacity style={styles.syncPill} onPress={resetAppData}>
-                  <View style={styles.syncDot} />
-                  <Text style={styles.syncText}>Reset</Text>
-                </TouchableOpacity>
+
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  {/* NEW SHARE BUTTON */}
+                  <TouchableOpacity style={styles.shareButton} activeOpacity={0.8} onPress={handleShareScore}>
+                    <Text style={styles.shareButtonText}>Share</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
+                    <View style={styles.syncDot} />
+                    <Text style={styles.syncText}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Financial Wellness Card (Heavy Glass) */}
@@ -468,6 +623,28 @@ export default function App() {
                 </View>
               </View>
 
+              {/* AI Behavior Feed */}
+              {behaviorFeed.length > 0 && (
+                <View style={{ marginBottom: 16 }}>
+                  <Text style={styles.cardHeaderTitle}>AI BEHAVIOR FEED</Text>
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={{ paddingRight: 20 }}
+                  >
+                    {behaviorFeed.map((insight, i) => (
+                      <View key={i} style={[styles.insightCard, { borderColor: `${insight.color}30` }]}>
+                        <View style={[styles.insightIconBadge, { backgroundColor: `${insight.color}20` }]}>
+                          <Text style={{ fontSize: 14 }}>{insight.icon === 'calendar' ? '📅' : insight.icon === 'moon' ? '🌙' : insight.icon === 'tag' ? '🏷️' : '⚠️'}</Text>
+                        </View>
+                        <Text style={[styles.insightTitle, { color: insight.color }]}>{insight.title}</Text>
+                        <Text style={styles.insightText}>{insight.text}</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
               {/* Premium Weekly Spending Chart */}
               <View style={[styles.glassCard, { padding: 22, marginTop: 16 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
@@ -501,6 +678,36 @@ export default function App() {
           userLabels={userLabels}
         />
       )}
+      {/* AI Daily Morning Briefing Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showBriefing}
+        onRequestClose={() => setShowBriefing(false)}
+      >
+        <View style={styles.briefingOverlay}>
+          <View style={styles.briefingCard}>
+            <Text style={styles.briefingTitle}>☀️ Good Morning</Text>
+
+            {isFetchingBriefing ? (
+              <View style={{ paddingVertical: 20, alignItems: 'center' }}>
+                <ActivityIndicator color={C.accent} size="large" />
+                <Text style={{ color: C.textSecondary, marginTop: 12, fontSize: 13 }}>Analyzing your data...</Text>
+              </View>
+            ) : (
+              <>
+                <Text style={styles.briefingText}>{morningBriefing}</Text>
+                <TouchableOpacity
+                  style={styles.briefingButton}
+                  onPress={() => setShowBriefing(false)}
+                >
+                  <Text style={styles.briefingButtonText}>Let's go</Text>
+                </TouchableOpacity>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
 
       {/* Tab Bar */}
       <View style={styles.tabBar}>
@@ -591,4 +798,90 @@ const styles = StyleSheet.create({
   tabIconActive: { color: C.accent, fontSize: 24 },
   tabLabel: { color: 'transparent', fontSize: 10, fontWeight: '600', height: 12 },
   tabLabelActive: { color: C.accent, fontWeight: 'bold' },
+
+  // AI Morning Briefing Modal
+  briefingOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  briefingCard: {
+    width: '100%',
+    backgroundColor: C.glassStrong, // Dark glass
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.3)', // Neon blue border
+    borderRadius: 24,
+    padding: 28,
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  briefingTitle: {
+    color: C.accent, // Neon Blue
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 16,
+  },
+  briefingText: {
+    color: C.textPrimary, // White
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  briefingButton: {
+    backgroundColor: C.accent, // Neon Blue
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 12,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.6,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  briefingButtonText: {
+    color: '#001018', // Dark text on neon blue button
+    fontSize: 15,
+    fontWeight: 'bold',
+  },
+  // AI Behavior Feed
+  insightCard: {
+    width: 260,
+    backgroundColor: C.glass,
+    borderWidth: 1,
+    borderRadius: 20,
+    padding: 16,
+    marginRight: 12,
+  },
+  insightIconBadge: {
+    width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 12
+  },
+  insightTitle: {
+    fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 6
+  },
+  insightText: {
+    color: C.textPrimary, fontSize: 13, lineHeight: 19
+  },
+  // Share Button
+  shareButton: {
+    backgroundColor: 'rgba(56,189,248,0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.4)',
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    borderRadius: 20,
+  },
+  shareButtonText: {
+    color: C.accent,
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });
