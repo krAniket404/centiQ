@@ -2,38 +2,61 @@ import React from 'react';
 import { View, Text, StyleSheet, Dimensions, TouchableOpacity } from 'react-native';
 
 const C = {
-  bg: "#080808", textPrimary: "#FFFFFF", textSecondary: "#B8B8B8", accent: "#38BDF8"
+  bg: "#060606", textPrimary: "#FFFFFF", textSecondary: "#9A9AA0", accent: "#38BDF8"
 };
 
 interface PremiumChartProps {
   data: { day: string; amount: number }[];
   activeDay: number | null;
   setActiveDay: (i: number | null) => void;
+  maxValue?: number;
 }
 
-export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumChartProps) {
-  const CHART_WIDTH = Dimensions.get('window').width - 92;
-  const CHART_HEIGHT = 140;
-  const maxVal = Math.max(...data.map(d => Number(d.amount) || 0), 1);
+export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }: PremiumChartProps) {
+  // Add right padding so the ₹ labels don't get cut off
+  const CHART_WIDTH = Dimensions.get('window').width - 80 - 30;
+  const CHART_HEIGHT = 150;
+  const PADDING_TOP = 15;
+  const PADDING_BOTTOM = 25;
+  const USABLE_HEIGHT = CHART_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
+
+  // Calculate "Nice" Maximum (Rounds up to nearest 1000)
+  const rawMax = maxValue ? Math.max(maxValue, 1) : Math.max(...data.map(d => Number(d.amount) || 0), 1);
+  const niceMax = Math.ceil(rawMax / 1000) * 1000;
+  const maxVal = niceMax > 0 ? niceMax : 1000;
+
+  // Determine step size (2000 if max is high, 1000 if max is low)
+  const stepSize = maxVal >= 6000 ? 2000 : 1000;
+
+  // Generate the specific values to show on the grid (e.g., [2000, 4000, 6000, 8000])
+  const gridValues = [];
+  for (let v = stepSize; v <= maxVal; v += stepSize) {
+    gridValues.push(v);
+  }
 
   // Map data to exact X and Y coordinates on the screen
+  // FIX: Handle data.length === 1 to prevent division by zero
   const points = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * CHART_WIDTH;
-    const y = CHART_HEIGHT - ((Number(d.amount) || 0) / maxVal) * (CHART_HEIGHT - 30) - 15;
+    const x = data.length > 1 ? (i / (data.length - 1)) * CHART_WIDTH : CHART_WIDTH / 2;
+    const y = PADDING_TOP + USABLE_HEIGHT - ((Number(d.amount) || 0) / maxVal) * USABLE_HEIGHT;
     return { x, y, value: Number(d.amount) || 0, day: d.day };
   });
 
-  // 1. Draw the Area Fill (using many thin vertical bars to simulate a smooth polygon)
+  // 1. Draw the Area Fill (simulated gradient polygon)
   const fillBars = [];
   const steps = 80;
   for (let i = 0; i < steps; i++) {
     const t = i / (steps - 1);
-    const segmentIndex = Math.min(Math.floor(t * (points.length - 1)), points.length - 2);
-    const localT = (t * (points.length - 1)) - segmentIndex;
-    const p1 = points[segmentIndex];
-    const p2 = points[segmentIndex + 1];
+    const segmentIndex = Math.min(Math.floor(t * (points.length - 1)), Math.max(0, points.length - 2));
+    const localT = points.length > 1 ? (t * (points.length - 1)) - segmentIndex : 0;
+    const p1 = points[segmentIndex] || points[0];
+    const p2 = points[segmentIndex + 1] || points[0];
     const x = p1.x + (p2.x - p1.x) * localT;
     const y = p1.y + (p2.y - p1.y) * localT;
+
+    // Calculate opacity for gradient effect (fades towards bottom)
+    const heightFraction = (CHART_HEIGHT - y) / CHART_HEIGHT;
+    const opacity = 0.25 - (heightFraction * 0.20);
 
     fillBars.push(
       <View
@@ -42,15 +65,15 @@ export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumC
           position: 'absolute',
           left: x,
           top: y,
-          width: (CHART_WIDTH / steps) + 2, // Overlap slightly to avoid gaps
-          height: CHART_HEIGHT - y + 5,
-          backgroundColor: 'rgba(56,189,248,0.15)', // Translucent blue fill
+          width: (CHART_WIDTH / steps) + 2,
+          height: CHART_HEIGHT - y,
+          backgroundColor: `rgba(56,189,248,${opacity})`,
         }}
       />
     );
   }
 
-  // 2. Draw the Smooth Line (using rotated Views to connect the dots)
+  // 2. Draw the Smooth Line
   const lines = [];
   for (let i = 0; i < points.length - 1; i++) {
     const p1 = points[i];
@@ -66,18 +89,18 @@ export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumC
         style={{
           position: 'absolute',
           left: p1.x,
-          top: p1.y - 2, // Center the 4px line on the point
+          top: p1.y - 1.5,
           width: length,
-          height: 4,
+          height: 3,
           backgroundColor: C.accent,
-          borderRadius: 2,
+          borderRadius: 1.5,
           transform: [{ rotate: `${angle}deg` }],
           transformOrigin: 'left center',
           shadowColor: C.accent,
           shadowOffset: { width: 0, height: 0 },
-          shadowOpacity: 0.8,
-          shadowRadius: 6,
-          elevation: 5,
+          shadowOpacity: 0.7,
+          shadowRadius: 4,
+          elevation: 4,
         }}
       />
     );
@@ -85,14 +108,22 @@ export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumC
 
   return (
     <View style={styles.container}>
-      {/* Faint horizontal grid lines */}
-      <View style={[styles.gridLine, { top: 15 }]} />
-      <View style={[styles.gridLine, { top: CHART_HEIGHT / 2 }]} />
-      <View style={[styles.gridLine, { bottom: 15 }]} />
+      <View style={{ width: CHART_WIDTH, height: CHART_HEIGHT, marginLeft: 15 }}>
 
-      <View style={{ width: CHART_WIDTH, height: CHART_HEIGHT }}>
+        {/* Horizontal Grid Lines & Scale Labels */}
+        {gridValues.map((val, i) => {
+          const frac = 1 - (val / maxVal);
+          const y = PADDING_TOP + (USABLE_HEIGHT * frac);
+          return (
+            <View key={`grid-${i}`} style={[styles.gridLine, { top: y }]}>
+              <Text style={styles.gridLabel}>₹{val / 1000}k</Text>
+            </View>
+          );
+        })}
+
         {/* Render Area Fill */}
         {fillBars}
+
         {/* Render Lines */}
         {lines}
 
@@ -106,7 +137,6 @@ export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumC
           >
             {activeDay === i && (
               <View style={styles.tooltip}>
-                {/* Fixed number formatting here */}
                 <Text style={styles.tooltipText}>₹{Math.round(p.value).toLocaleString('en-IN')}</Text>
                 <View style={styles.tooltipArrow} />
               </View>
@@ -120,7 +150,7 @@ export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumC
       </View>
 
       {/* X Axis Labels */}
-      <View style={styles.xAxis}>
+      <View style={[styles.xAxis, { width: CHART_WIDTH, marginLeft: 15 }]}>
         {data.map((d, i) => (
           <Text key={i} style={[styles.xAxisLabel, activeDay === i && styles.xAxisLabelActive]}>
             {d.day}
@@ -134,14 +164,23 @@ export default function PremiumChart({ data, activeDay, setActiveDay }: PremiumC
 const styles = StyleSheet.create({
   container: {
     marginTop: 10,
-    alignItems: 'center'
+    alignItems: 'flex-start'
   },
   gridLine: {
     position: 'absolute',
     left: 0,
     right: 0,
     height: 1,
-    backgroundColor: 'rgba(255,255,255,0.04)'
+    backgroundColor: 'rgba(255,255,255,0.06)'
+  },
+  gridLabel: {
+    position: 'absolute',
+    left: -35,
+    top: -6,
+    fontSize: 9,
+    color: 'rgba(255,255,255,0.4)',
+    width: 30,
+    textAlign: 'right',
   },
   dotWrapper: {
     position: 'absolute',
@@ -150,7 +189,7 @@ const styles = StyleSheet.create({
   },
   tooltip: {
     position: 'absolute',
-    top: -32,
+    top: -38,
     backgroundColor: '#111111',
     paddingHorizontal: 10,
     paddingVertical: 5,
@@ -201,8 +240,7 @@ const styles = StyleSheet.create({
   xAxis: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 16,
-    width: '100%'
+    marginTop: 12
   },
   xAxisLabel: {
     color: C.textSecondary,

@@ -3,15 +3,16 @@ import { isKnownSubscription } from './subscriptionList';
 
 // JPMorgan Chase Institute CV boundaries shifted down by 15%
 const CV_BOUNDARIES = {
-  Q1: 0.187 * 0.85, // 0.1589
-  Q2: 0.272 * 0.85, // 0.2312
-  Q3: 0.374 * 0.85, // 0.3179
-  Q4: 0.561 * 0.85, // 0.4768
+  Q1: 0.187 * 0.85,
+  Q2: 0.272 * 0.85,
+  Q3: 0.374 * 0.85,
+  Q4: 0.561 * 0.85,
 };
 
-// The population average (Prior) - roughly the Q2 boundary
-const POPULATION_CV_PRIOR = 0.2312;
-const PRIOR_STRENGTH = 10; // k=10 means prior is worth ~10 months of data
+// Distinct Priors for Discipline (Monthly) vs Volatility (Weekly)
+const DISCIPLINE_PRIOR = 0.2312;
+const VOLATILITY_PRIOR = 0.3500; // Weekly spending is naturally more volatile
+const PRIOR_STRENGTH = 3; // Lowered from 10 so personal data has much more impact
 
 function mapCVtoScore(cv: number): number {
   if (cv < CV_BOUNDARIES.Q1) return 100;
@@ -22,13 +23,10 @@ function mapCVtoScore(cv: number): number {
 }
 
 // --- EMPIRICAL BAYES SHRINKAGE ---
-// Blends the population prior with the user's personal CV
-function blendCV(personalCV: number, dataPoints: number): number {
+function blendCV(personalCV: number, dataPoints: number, prior: number): number {
   const k = PRIOR_STRENGTH;
   const n = Math.max(dataPoints, 0);
-
-  // Formula: (population×k + personal×n) / (k+n)
-  const blended = ((POPULATION_CV_PRIOR * k) + (personalCV * n)) / (k + n);
+  const blended = ((prior * k) + (personalCV * n)) / (k + n);
   return blended;
 }
 
@@ -58,8 +56,8 @@ export function calculateDisciplineScore(transactions: ParsedTransaction[]): num
   const variance = spends.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / monthsOfData;
   const personalCV = Math.sqrt(variance) / mean;
 
-  // Blend with population prior
-  const blendedCV = blendCV(personalCV, monthsOfData);
+  // Use Discipline Prior
+  const blendedCV = blendCV(personalCV, monthsOfData, DISCIPLINE_PRIOR);
   return mapCVtoScore(blendedCV);
 }
 
@@ -105,13 +103,9 @@ export function calculateVolatilityScore(transactions: ParsedTransaction[]): num
   const variance = spends.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / weeksOfData;
   const personalCV = Math.sqrt(variance) / mean;
 
-  // Blend with population prior
-  const blendedCV = blendCV(personalCV, weeksOfData);
+  // Use Volatility Prior
+  const blendedCV = blendCV(personalCV, weeksOfData, VOLATILITY_PRIOR);
   return mapCVtoScore(blendedCV);
-}
-
-export function calculateWellnessScore(discipline: number, impulse: number, volatility: number): number {
-  return Math.round((discipline * (1/3)) + ((100 - impulse) * (1/3)) + ((100 - volatility) * (1/3)));
 }
 
 // --- SUBSCRIPTION & REPETITIVE PAYMENT DETECTION ---
@@ -120,6 +114,7 @@ export interface RecurringCharge {
   merchant: string;
   amount: number;
   count: number;
+  transactions: ParsedTransaction[]; // Added to hold the actual dates
 }
 
 export interface SubscriptionResult {
@@ -130,23 +125,27 @@ export interface SubscriptionResult {
 export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): SubscriptionResult {
   const recurringMap: { [key: string]: ParsedTransaction[] } = {};
 
-  // Group transactions by merchant + amount
+  // Group transactions by Merchant Name ONLY (ignoring amount)
   transactions.filter(t => t.type === 'debit').forEach(t => {
-    const key = `${t.merchant}-${t.amount}`;
+    const key = t.merchant || 'Unknown Merchant';
     if (!recurringMap[key]) recurringMap[key] = [];
     recurringMap[key].push(t);
   });
 
   const knownSubs: RecurringCharge[] = [];
-  const repetitivePays: RecurringCharge[] = [];
+  const repetitivePays: RepetitiveCharge[] = [];
 
   // Split them based on the known list
   Object.values(recurringMap).forEach(group => {
-    if (group.length >= 3) { // 3 or more identical charges = recurring
+    if (group.length >= 3) { // 3 or more transactions = recurring
+      // Calculate total amount spent across all transactions
+      const totalAmount = group.reduce((sum, t) => sum + t.amount, 0);
+
       const charge = {
         merchant: group[0].merchant,
-        amount: group[0].amount,
-        count: group.length
+        amount: totalAmount, // Now shows total spent
+        count: group.length,
+        transactions: group
       };
 
       if (isKnownSubscription(charge.merchant)) {
@@ -158,4 +157,8 @@ export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): Subs
   });
 
   return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays };
+}
+
+export function calculateWellnessScore(discipline: number, impulse: number, volatility: number): number {
+  return Math.round((discipline * (1/3)) + ((100 - impulse) * (1/3)) + ((100 - volatility) * (1/3)));
 }

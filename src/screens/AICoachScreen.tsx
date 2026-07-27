@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, NativeModules } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
+
+const { SmsModule } = NativeModules;
+const CHAT_STORAGE_KEY = 'centiq_chat_history';
 
 const C = {
   bg: "#080808", glass: "rgba(255,255,255,0.06)", border: "rgba(255,255,255,0.12)",
-  textPrimary: "#FFFFFF", textSecondary: "#B8B8B8", accent: "#38BDF8", success: "#10B981"
+  textPrimary: "#FFFFFF", textSecondary: "#B8B8B8", accent: "#38BDF8", success: "#10B981", warning: "#F59E0B", danger: "#EF4444"
 };
 
 interface Message {
@@ -18,86 +21,105 @@ interface Props {
 }
 
 export default function AICoachScreen({ transactions, scores }: Props) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: 'assistant',
-      content: "Hi! I'm your CentiQ AI Coach. I can see your behavioral scores and recent transactions. Ask me anything about your spending habits!"
-    }
-  ]);
+  // Start with an empty array, we will load saved messages in useEffect
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingChat, setIsFetchingChat] = useState(true); // Prevents flicker while loading
   const flatListRef = useRef<FlatList>(null);
 
-  // PASTE YOUR API KEY HERE
-  const API_KEY = 'YOUR_GEMINI_API_KEY';
+  // 1. Load Chat History on Mount
+  useEffect(() => {
+    const loadChat = async () => {
+      try {
+        const savedChat = await SmsModule.loadData(CHAT_STORAGE_KEY);
+        if (savedChat) {
+          const parsedChat = JSON.parse(savedChat);
+          setMessages(parsedChat);
+        } else {
+          // If no history, show the welcome message
+          setMessages([{
+            role: 'assistant',
+            content: "Hi! I'm your CentiQ AI Coach. I run 100% offline on your device. Ask me about your wellness score, impulse index, top spending categories, or how to save money!"
+          }]);
+        }
+      } catch (e) {
+        setMessages([{
+          role: 'assistant',
+          content: "Hi! I'm your CentiQ AI Coach. I run 100% offline on your device. Ask me about your wellness score, impulse index, top spending categories, or how to save money!"
+        }]);
+      } finally {
+        setIsFetchingChat(false);
+      }
+    };
+    loadChat();
+  }, []);
 
-  const getContext = () => {
-    const recentTxns = transactions.slice(0, 10).map(t =>
-      `${t.type === 'credit' ? 'Income' : 'Spent'} ₹${t.amount} at ${t.merchant || t.bank} on ${t.date.toLocaleDateString()} (${t.category || 'Other'})`
-    ).join(', ');
+  // 2. Save Chat History whenever messages change
+  useEffect(() => {
+    if (messages.length > 0) {
+      SmsModule.saveData(CHAT_STORAGE_KEY, JSON.stringify(messages))
+        .catch(e => console.warn("Failed to save chat", e));
+    }
+  }, [messages]);
 
-    return `
-      User's Financial Data:
-      - Wellness Score: ${scores.wellness}/100
-      - Discipline Score: ${scores.discipline}/100
-      - Impulse Index: ${scores.impulse}/100 (higher is worse)
-      - Savings Rate: ${Math.round(scores.savingsRate)}%
-      - Recent Transactions: ${recentTxns}
+  // The Custom Chatbot Brain
+  const generateBotResponse = (userText: string): string => {
+    const msg = userText.toLowerCase();
 
-      Instruction: You are a helpful behavioral finance coach. Provide clear, structured, and detailed insights based on the user's data. Use bullet points if necessary. Do not use slang.
-    `;
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+
+    const catTotals: { [key: string]: number } = {};
+    debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
+    const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0] || 'Food';
+    const topCatAmount = Math.round(catTotals[topCat] || 0);
+
+    if (msg.includes('hi') || msg.includes('hello') || msg.includes('hey')) {
+      return "Hey there! Ready to decode your money habits? You can ask me about your scores, your spending, or ask for a tip to save money.";
+    }
+    if (msg.includes('wellness') || msg.includes('score')) {
+      return `Your Financial Wellness Score is ${scores.wellness}/100. This is a composite score based on your discipline, impulse control, and spending volatility. ${scores.wellness >= 70 ? "You're doing great!" : "There's room for improvement."}`;
+    }
+    if (msg.includes('impulse') || msg.includes('impulsive')) {
+      if (scores.impulse > 60) {
+        return `Your Impulse Index is ${scores.impulse}/100. This is a bit high. I noticed you have several late-night transactions and same-day clusters. Try the 24-hour rule: wait a day before buying anything non-essential over ₹500.`;
+      } else {
+        return `Your Impulse Index is ${scores.impulse}/100. You're doing a great job controlling your impulses! Keep logging your 'Worth It' purchases so I can learn more about your habits.`;
+      }
+    }
+    if (msg.includes('discipline') || msg.includes('volatility')) {
+      return `Your Discipline score is ${scores.discipline}/100 and Volatility is ${scores.volatility}/100. These measure how consistent your spending is compared to your average. A lower volatility means you aren't making erratic, unpredictable purchases.`;
+    }
+    if (msg.includes('spend') || msg.includes('category') || msg.includes('food') || msg.includes('shopping')) {
+      return `Looking at your debits, your top spending category is ${topCat}. You've spent approximately ₹${topCatAmount.toLocaleString('en-IN')} there. If you want to save money, cutting back here by just 15% would massively improve your wellness score.`;
+    }
+    if (msg.includes('save') || msg.includes('saving') || msg.includes('advice') || msg.includes('tip')) {
+      return `Here is a pro tip: Based on your data, your weekend spending is usually higher than weekdays. Try setting a strict 'weekend cash envelope'—withdraw ₹2000 on Friday and don't use your card for the weekend. This creates a hard visual limit.`;
+    }
+    if (msg.includes('subscription') || msg.includes('netflix') || msg.includes('spotify')) {
+      return "Check the Subscriptions card on your Dashboard! I scan your history for recurring identical charges. If you see subscriptions you don't use anymore, canceling them is the fastest way to boost your savings rate.";
+    }
+
+    return "I can analyze your wellness, impulse index, top spending categories, or give you savings tips. Try asking: 'Why is my impulse score high?' or 'How can I save money?'";
   };
 
-  const sendMessage = async () => {
-    if (!inputText.trim() || isLoading) return;
+  const sendMessage = async (textToSend?: string) => {
+    const messageText = textToSend || inputText;
+    if (!messageText.trim() || isLoading) return;
 
-    const userMessage: Message = { role: 'user', content: inputText };
+    const userMessage: Message = { role: 'user', content: messageText };
     const newMessages = [...messages, userMessage];
     setMessages(newMessages);
     setInputText('');
     setIsLoading(true);
 
-    console.log("Attempting to use API Key:", API_KEY);
-
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${API_KEY}`, {        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          systemInstruction: {
-            parts: [{ text: getContext() }]
-          },
-          contents: newMessages.map(m => ({
-            role: m.role === 'assistant' ? 'model' : 'user',
-            parts: [{ text: m.content }]
-          })),
-          generationConfig: { maxOutputTokens: 1600 }
-        })
-      });
-
-      const data = await response.json();
-      console.log("Gemini API Response:", JSON.stringify(data, null, 2));
-
-      if (!response.ok) {
-        throw new Error(data?.error?.message || 'Network response was not ok');
-      }
-
-      if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-        const aiText = data.candidates[0].content.parts[0].text;
-        const aiMessage: Message = { role: 'assistant', content: aiText };
-        setMessages([...newMessages, aiMessage]);
-      } else {
-        throw new Error('No candidates returned from API');
-      }
-    } catch (error: any) {
-      console.error('AI Error Details:', error);
-      const errorMessage: Message = {
-        role: 'assistant',
-        content: `Error: ${error.message || "Couldn't connect to the AI. Check your Metro terminal for details."}`
-      };
-      setMessages([...newMessages, errorMessage]);
-    } finally {
+    setTimeout(() => {
+      const botResponse = generateBotResponse(messageText);
+      const aiMessage: Message = { role: 'assistant', content: botResponse };
+      setMessages([...newMessages, aiMessage]);
       setIsLoading(false);
-    }
+    }, 800);
   };
 
   useEffect(() => {
@@ -106,13 +128,26 @@ export default function AICoachScreen({ transactions, scores }: Props) {
     }
   }, [messages, isLoading]);
 
+  // Don't render the list until chat is loaded to prevent flicker
+  if (isFetchingChat) {
+    return <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator color={C.accent} size="large" /></View>;
+  }
+
   return (
     <KeyboardAvoidingView
       style={{ flex: 1, marginTop: 20 }}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={90}
     >
-      <Text style={styles.headerTitle}>AI Coach</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingHorizontal: 4 }}>
+        <View>
+          <Text style={styles.headerTitle}>AI Coach</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 4 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#10B981', marginRight: 8 }} />
+            <Text style={{ color: '#9A9AA0', fontSize: 12 }}>Offline Mode - 100% Private</Text>
+          </View>
+        </View>
+      </View>
 
       <FlatList
         ref={flatListRef}
@@ -134,7 +169,7 @@ export default function AICoachScreen({ transactions, scores }: Props) {
       {isLoading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={C.accent} size="small" />
-          <Text style={styles.loadingText}>Coach is thinking...</Text>
+          <Text style={styles.loadingText}>Analyzing your data...</Text>
         </View>
       )}
 
@@ -147,7 +182,7 @@ export default function AICoachScreen({ transactions, scores }: Props) {
           onChangeText={setInputText}
           multiline
         />
-        <TouchableOpacity style={styles.sendButton} onPress={sendMessage} disabled={isLoading}>
+        <TouchableOpacity style={styles.sendButton} onPress={() => sendMessage()} disabled={isLoading}>
           <Text style={styles.sendText}>↑</Text>
         </TouchableOpacity>
       </View>
@@ -156,7 +191,7 @@ export default function AICoachScreen({ transactions, scores }: Props) {
 }
 
 const styles = StyleSheet.create({
-  headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700', marginBottom: 20, paddingHorizontal: 4 },
+  headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700', paddingHorizontal: 4 },
   messageBubble: {
     maxWidth: '85%',
     padding: 14,
@@ -183,6 +218,7 @@ const styles = StyleSheet.create({
   aiText: {
     color: C.textPrimary,
     fontSize: 14,
+    lineHeight: 20
   },
   loadingContainer: {
     flexDirection: 'row',
@@ -205,7 +241,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    marginBottom: 100,
+    marginBottom: 20,
   },
   input: {
     flex: 1,

@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView
+  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share, TextInput, Dimensions, RefreshControl
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
-import { UserBehaviorModel, UserLabel } from './src/lib/personalization';
 import { backfillHistory } from './src/lib/historicalSync';
+import { UserBehaviorModel, UserLabel } from './src/lib/personalization';
 import BudgetsScreen from './src/screens/BudgetsScreen';
 import TransactionsScreen from './src/screens/TransactionsScreen';
 import AICoachScreen from './src/screens/AICoachScreen';
@@ -42,9 +42,18 @@ const C = {
 };
 
 export default function App() {
+  const [goals, setGoals] = useState<any[]>([]);
+  const [showAddGoalModal, setShowAddGoalModal] = useState(false);
+  const [newGoalName, setNewGoalName] = useState('');
+  const [newGoalTarget, setNewGoalTarget] = useState('');
+  const [newGoalCurrent, setNewGoalCurrent] = useState('');
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showAllRepetitive, setShowAllRepetitive] = useState(false);
+
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
   const [isFetchingBriefing, setIsFetchingBriefing] = useState(false);
+  const [expandedCharge, setExpandedCharge] = useState<string | null>(null);
 
   // PASTE YOUR GEMINI API KEY HERE
   const API_KEY = 'YOUR_GEMINI_API_KEY';
@@ -57,6 +66,8 @@ export default function App() {
   const [worthItTxnIds, setWorthItTxnIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'budgets' | 'coach' | 'settings'>('dashboard');
   const [activeDay, setActiveDay] = useState<number | null>(null);
+  const chartScrollRef = useRef<FlatList>(null);
+  const [activeHeatmapDay, setActiveHeatmapDay] = useState<number | null>(null);
 
   const [model] = useState(new UserBehaviorModel());
   const [userLabels, setUserLabels] = useState<UserLabel[]>([]);
@@ -150,22 +161,50 @@ export default function App() {
     return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
   }, [transactions]);
 
-  const weeklyData = useMemo(() => {
-    const spendByDay = [0, 0, 0, 0, 0, 0, 0];
+  // Group transactions into Weeks of the current Month
+  const monthlyWeeklyData = useMemo(() => {
     const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    // Initialize 5 weeks (max in a month), each with Mon-Sun structure
+    const weeks = Array.from({ length: 5 }, (_, i) => ({
+      weekNum: i + 1,
+      data: [
+        { day: 'Mon', amount: 0 }, { day: 'Tue', amount: 0 }, { day: 'Wed', amount: 0 },
+        { day: 'Thu', amount: 0 }, { day: 'Fri', amount: 0 }, { day: 'Sat', amount: 0 }, { day: 'Sun', amount: 0 }
+      ]
+    }));
+
     transactions.forEach(t => {
-      if (t.type === 'debit') {
-        const diffDays = Math.floor((now.getTime() - t.date.getTime()) / (1000 * 60 * 60 * 24));
-        if (diffDays >= 0 && diffDays < 7) spendByDay[t.date.getDay()] += t.amount;
+      if (t.type === 'debit' && t.date.getMonth() === currentMonth && t.date.getFullYear() === currentYear) {
+        const dayOfMonth = t.date.getDate();
+        const weekIndex = Math.floor((dayOfMonth - 1) / 7); // 0 to 4
+        if (weekIndex < 5) {
+          const dayOfWeek = t.date.getDay(); // 0=Sun, 1=Mon...
+          const mapIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Map to 0=Mon, 6=Sun
+          weeks[weekIndex].data[mapIndex].amount += t.amount;
+        }
       }
     });
-    return [
-      { day: 'Mon', amount: spendByDay[1] }, { day: 'Tue', amount: spendByDay[2] },
-      { day: 'Wed', amount: spendByDay[3] }, { day: 'Thu', amount: spendByDay[4] },
-      { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
-      { day: 'Sun', amount: spendByDay[0] },
-    ];
+
+    // Determine which weeks actually have data or are the current week
+    const currentWeekIndex = Math.floor((now.getDate() - 1) / 7);
+    return weeks.filter((w, i) => w.data.some(d => d.amount > 0) || i === currentWeekIndex);
   }, [transactions]);
+
+  // Find the highest spend day across the whole month for a consistent Y-axis scale
+  const globalMaxSpend = useMemo(() => {
+    let max = 0;
+    monthlyWeeklyData.forEach(week => {
+      week.data.forEach(day => {
+        if (day.amount > max) max = day.amount;
+      });
+    });
+    return max > 0 ? max : 1;
+  }, [monthlyWeeklyData]);
+  // State to track which week is selected
+  const [activeWeekIndex, setActiveWeekIndex] = useState(0);
 
   // Calculate Monthly Forecast & Overspend Risk
   const monthlyForecast = useMemo(() => {
@@ -282,6 +321,56 @@ export default function App() {
     return insights;
   }, [transactions]);
 
+  // Financial Persona & 30-Day Heatmap Engine
+  const behavioralProfile = useMemo(() => {
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+
+    // Calculate Top Category for "Foodie" persona
+    const catTotals: { [key: string]: number } = {};
+    debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
+    const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
+
+    // 1. Determine Persona based on ML scores and data
+    let persona = { name: 'The Balanced Spender', desc: 'You have a healthy mix of discipline and spontaneity.', icon: '⚖️', color: C.accent };
+
+    // High Priority Extremes
+    if (scores.impulse > 60 && scores.volatility > 60) {
+      persona = { name: 'The Midnight Impulser', desc: 'High volatility and late-night triggers. You act fast and feel it later.', icon: '⚡', color: C.danger };
+    } else if (scores.discipline > 70 && scores.savingsRate > 50) {
+      persona = { name: 'The Stealth Saver', desc: 'Highly disciplined. You crush your savings goals without thinking twice.', icon: '🛡️', color: C.success };
+    }
+    // New Specialized Personas
+    else if (recurringCharges.knownSubscriptions.length >= 4) {
+      persona = { name: 'The Subscription Hoarder', desc: 'You have 4+ active recurring subscriptions. Time to audit and cancel the unused ones!', icon: '📦', color: C.purple };
+    } else if (topCat === 'Food' && scores.impulse > 50) {
+      persona = { name: 'The Foodie Impulser', desc: 'Food is your top category, and your impulse score is high. Those late-night deliveries add up!', icon: '🍔', color: C.warning };
+    } else if (scores.impulse > 40 && scores.discipline < 50) {
+      persona = { name: 'The Weekend Warrior', desc: 'You stay disciplined during the week, but cut loose on the weekends.', icon: '🎉', color: C.warning };
+    }
+
+    // 2. Generate 30-Day Heatmap Data
+    const days: { date: Date; amount: number; isImpulsive: boolean }[] = [];
+    const today = new Date();
+
+    for (let i = 29; i >= 0; i--) {
+      const date = new Date(today);
+      date.setDate(today.getDate() - i);
+      date.setHours(0, 0, 0, 0);
+
+      const dayTxns = transactions.filter(t => {
+        const tDate = new Date(t.date);
+        return tDate.toDateString() === date.toDateString() && t.type === 'debit';
+      });
+
+      const amount = dayTxns.reduce((a, b) => a + b.amount, 0);
+      const isImpulsive = dayTxns.some(t => t.date.getHours() >= 22 || t.date.getHours() <= 4 || t.amount > avgAmount * 1.5);
+
+      days.push({ date, amount, isImpulsive });
+    }
+
+    return { persona, heatmap: days };
+  }, [scores, transactions, avgAmount, recurringCharges]); // Added recurringCharges to dependencies
+
   // --- FUNCTIONS START HERE ---
   const loadSavedData = async () => {
     try {
@@ -292,6 +381,7 @@ export default function App() {
       if (parsed.userLabels) setUserLabels(parsed.userLabels);
       if (parsed.labeledTxnIds) setLabeledTxnIds(parsed.labeledTxnIds);
       if (parsed.worthItTxnIds) setWorthItTxnIds(parsed.worthItTxnIds);
+      if (parsed.goals) setGoals(parsed.goals); // <-- ADD THIS
       return parsed;
     } catch (e) { return null; }
   };
@@ -302,6 +392,7 @@ export default function App() {
       userLabels: overrides.userLabels ?? userLabels,
       labeledTxnIds: overrides.labeledTxnIds ?? labeledTxnIds,
       worthItTxnIds: overrides.worthItTxnIds ?? worthItTxnIds,
+      goals: overrides.goals ?? goals, // <-- ADD THIS
     };
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
@@ -425,6 +516,12 @@ export default function App() {
     } catch (e) { console.error("Failed to read SMS", e); }
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    await fetchSMS(savedStateRef.current);
+    setIsRefreshing(false);
+  };
+
   const syncToCloud = async (txns: ParsedTransaction[]) => {
     const userId = session?.user?.id || '00000000-0000-0000-0000-000000000000';
     const payload = txns.map(t => ({
@@ -464,6 +561,35 @@ export default function App() {
     const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
     setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
     saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
+  };
+
+  const handleAddGoal = () => {
+    if (!newGoalName || !newGoalTarget) {
+      Alert.alert("Error", "Please enter a goal name and target amount.");
+      return;
+    }
+
+    const colors = [C.accent, C.success, C.warning, C.purple, C.danger];
+    const randomColor = colors[Math.floor(Math.random() * colors.length)];
+
+    const newGoal = {
+      id: Date.now().toString(),
+      name: newGoalName,
+      target: parseFloat(newGoalTarget),
+      current: parseFloat(newGoalCurrent) || 0,
+      color: randomColor,
+      deadline: 'No deadline'
+    };
+
+    const updatedGoals = [...goals, newGoal];
+    setGoals(updatedGoals);
+    saveState({ goals: updatedGoals });
+
+    // Reset inputs and close modal
+    setNewGoalName('');
+    setNewGoalTarget('');
+    setNewGoalCurrent('');
+    setShowAddGoalModal(false);
   };
 
   // TEMPORARILY BYPASS LOGIN TO TEST THE APP
@@ -507,7 +633,7 @@ export default function App() {
     );
   }
 
-  return (
+return (
     <View style={styles.darkContainer}>
       <StatusBar barStyle="light-content" />
 
@@ -516,6 +642,13 @@ export default function App() {
           data={[]}
           renderItem={null}
           contentContainerStyle={{ paddingBottom: 110 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor={C.accent} // Makes the spinner blue!
+            />
+          }
           ListHeaderComponent={() => (
             <View>
               <View style={styles.headerRow}>
@@ -557,6 +690,76 @@ export default function App() {
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Savings Rate</Text><Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text></View>
                       <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: getDynamicScoreColor(scores.savingsRate, 'higher_is_better') }]} /></View>
                     </View>
+                  </View>
+                </View>
+              </View>
+
+              {/* Financial Persona Card */}
+              <View style={[styles.glassCardHeavy, { padding: 22, marginBottom: 18, flexDirection: 'row', alignItems: 'center' }]}>
+                <View style={[
+                  styles.personaIconBadge,
+                  {
+                    backgroundColor: `${behavioralProfile.persona.color}20`,
+                    borderColor: `${behavioralProfile.persona.color}50`,
+                    shadowColor: behavioralProfile.persona.color,
+                  },
+                ]}>
+                  <Text style={{ fontSize: 28 }}>{behavioralProfile.persona.icon}</Text>
+                </View>
+                <View style={{ flex: 1, marginLeft: 16 }}>
+                  <Text style={styles.personaLabel}>YOUR FINANCIAL PERSONA</Text>
+                  <Text style={[styles.personaName, { color: behavioralProfile.persona.color }]}>{behavioralProfile.persona.name}</Text>
+                  <Text style={styles.personaDesc}>{behavioralProfile.persona.desc}</Text>
+                </View>
+              </View>
+
+              {/* Behavioral Heatmap */}
+              <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <Text style={styles.cardHeaderTitle}>30-DAY BEHAVIOR MAP</Text>
+
+                  {/* Dynamic Day Info */}
+                  {activeHeatmapDay !== null && behavioralProfile.heatmap[activeHeatmapDay] ? (
+                    <Text style={styles.heatmapSelectedText}>
+                      {behavioralProfile.heatmap[activeHeatmapDay].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ₹{Math.round(behavioralProfile.heatmap[activeHeatmapDay].amount).toLocaleString('en-IN')}
+                    </Text>
+                  ) : (
+                    <Text style={styles.heatmapSelectedText}>Tap a day</Text>
+                  )}
+                </View>
+
+                <View style={styles.heatmapGrid}>
+                  {behavioralProfile.heatmap.map((day, i) => {
+                    let bgColor = 'rgba(255,255,255,0.05)'; // No spend
+                    if (day.amount > 0 && !day.isImpulsive) bgColor = 'rgba(56,189,248,0.3)'; // Normal spend
+                    if (day.amount > 0 && day.isImpulsive) bgColor = C.danger; // Impulsive spend
+                    const isSelected = activeHeatmapDay === i;
+
+                    return (
+                      <TouchableOpacity
+                        key={i}
+                        activeOpacity={0.75}
+                        onPress={() => setActiveHeatmapDay(activeHeatmapDay === i ? null : i)}
+                        style={[
+                          styles.heatmapCell,
+                          { backgroundColor: bgColor },
+                          isSelected && {
+                            borderWidth: 1.5, borderColor: '#FFFFFF',
+                            shadowColor: '#FFFFFF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 6, elevation: 4,
+                          },
+                        ]}
+                      />
+                    );
+                  })}
+                </View>
+
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
+                  <Text style={styles.heatmapLegend}>Less</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                    <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: 'rgba(255,255,255,0.05)' }]} />
+                    <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: 'rgba(56,189,248,0.3)' }]} />
+                    <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: C.danger }]} />
+                    <Text style={styles.heatmapLegend}>More / Impulsive</Text>
                   </View>
                 </View>
               </View>
@@ -614,47 +817,55 @@ export default function App() {
                     <Text style={[styles.cardTopRowValue, { color: C.warning }]}>₹{recurringCharges.totalRepetitiveCost.toLocaleString('en-IN')}/mo</Text>
                   </View>
                   <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
-                    We detected {recurringCharges.repetitivePayments.length} recurring charges (bills, rent, gyms, etc).
+                    We detected {recurringCharges.repetitivePayments.length} recurring charges (bills, rent, gyms, etc). Tap to view dates.
                   </Text>
 
-                  {recurringCharges.repetitivePayments.map((l, i) => (
-                    <View key={i} style={styles.leakRow}>
-                      <View>
-                        <Text style={styles.leakMerchant}>{l.merchant}</Text>
-                        <Text style={styles.leakCount}>Charged {l.count} times</Text>
-                      </View>
-                      <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
+                  {/* Show only top 3, or all if showAllRepetitive is true */}
+                  {(showAllRepetitive ? recurringCharges.repetitivePayments : recurringCharges.repetitivePayments.slice(0, 3)).map((l, i) => {
+                    const key = `${l.merchant}-${l.amount}`;
+                    const isExpanded = expandedCharge === key;
 
-              {/* Bar Chart */}
-              <View style={[styles.glassCard, { padding: 22, marginBottom: 16 }]}>
-                <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (BARS)</Text>
-                <View style={styles.chartContainer}>
-                  {weeklyData.map((item, i) => {
-                    const maxVal = Math.max(...weeklyData.map(d => Number(d.amount) || 0), 1);
-                    const heightPct = ((Number(item.amount) || 0) / maxVal) * 100;
                     return (
-                      <TouchableOpacity key={i} style={styles.chartBarWrapper} activeOpacity={0.8} onPress={() => setActiveDay(activeDay === i ? null : i)}>
-                        {activeDay === i && (
-                          <View style={styles.barTooltip}>
-                            <Text style={styles.barTooltipText}>₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}</Text>
+                      <View key={i} style={{ borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                        <TouchableOpacity
+                          style={styles.leakRow}
+                          activeOpacity={0.75}
+                          onPress={() => setExpandedCharge(isExpanded ? null : key)}
+                        >
+                          <View>
+                            <Text style={styles.leakMerchant}>{l.merchant}</Text>
+                            <Text style={styles.leakCount}>Charged {l.count} times · Tap to {isExpanded ? 'hide' : 'expand'}</Text>
+                          </View>
+                          <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')} total</Text>
+                        </TouchableOpacity>
+
+                        {isExpanded && (
+                          <View style={styles.expandedList}>
+                            {l.transactions.map((t, tIdx) => (
+                              <Text key={tIdx} style={styles.expandedText}>
+                                • {new Date(t.date).toLocaleString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                              </Text>
+                            ))}
                           </View>
                         )}
-                        <View style={styles.chartBarBg}>
-                          <View style={[styles.chartBarFill, {
-                            height: `${heightPct}%`,
-                            backgroundColor: activeDay === i ? C.accent : 'rgba(56,189,248,0.28)',
-                          }]} />
-                        </View>
-                        <Text style={[styles.chartDayLabel, activeDay === i && { color: C.accent, fontWeight: '700' }]}>{item.day}</Text>
-                      </TouchableOpacity>
+                      </View>
                     );
                   })}
+
+                  {/* View More / View Less Button */}
+                  {recurringCharges.repetitivePayments.length > 3 && (
+                    <TouchableOpacity
+                      style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
+                      activeOpacity={0.75}
+                      onPress={() => setShowAllRepetitive(!showAllRepetitive)}
+                    >
+                      <Text style={{ color: C.warning, fontSize: 12, fontWeight: 'bold' }}>
+                        {showAllRepetitive ? 'View Less' : `View ${recurringCharges.repetitivePayments.length - 3} More`}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
                 </View>
-              </View>
+              )}
 
               {/* AI Behavior Feed */}
               {behaviorFeed.length > 0 && (
@@ -677,6 +888,7 @@ export default function App() {
                   </ScrollView>
                 </View>
               )}
+
               {/* AI Monthly Forecast Card */}
               <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
@@ -705,10 +917,10 @@ export default function App() {
                   </View>
                 </View>
 
-                {/* Risk Bar */}
-                <View style={styles.riskBarBackground}>
+                {/* Risk Bar -- now matches the wellness meters' height/radius */}
+                <View style={styles.meterBackground}>
                   <View style={[
-                    styles.riskBarFill,
+                    styles.meterFill,
                     { width: `${monthlyForecast.overspendRisk}%`, backgroundColor: monthlyForecast.riskColor }
                   ]} />
                 </View>
@@ -716,13 +928,77 @@ export default function App() {
                   {monthlyForecast.riskLevel.toUpperCase()} RISK
                 </Text>
               </View>
-              {/* Premium Weekly Spending Chart */}
-              <View style={[styles.glassCard, { padding: 22 }]}>
+
+              {/* Savings Goals Card */}
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (TREND)</Text>
-                  <Text style={styles.subtleText}>₹{Math.round(weeklyData.reduce((a,b) => a + b.amount, 0)).toLocaleString('en-IN')}</Text>
+                  <Text style={styles.cardHeaderTitle}>SAVINGS GOALS</Text>
+                  <TouchableOpacity activeOpacity={0.75} onPress={() => setShowAddGoalModal(true)}>
+                    <Text style={{ color: C.accent, fontSize: 12, fontWeight: 'bold' }}>+ Add Goal</Text>
+                  </TouchableOpacity>
                 </View>
-                <PremiumChart data={weeklyData} activeDay={activeDay} setActiveDay={setActiveDay} />
+
+                {goals.length === 0 ? (
+                  <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10 }}>
+                    No goals yet. Tap "+ Add Goal" to start tracking!
+                  </Text>
+                ) : (
+                  goals.map((goal) => {
+                    const pct = Math.min((goal.current / goal.target) * 100, 100);
+                    return (
+                      <View key={goal.id} style={styles.goalRow}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                          <Text style={styles.goalName}>{goal.name}</Text>
+                          <Text style={styles.goalMeta}>₹{goal.current.toLocaleString('en-IN')} / ₹{goal.target.toLocaleString('en-IN')}</Text>
+                        </View>
+                        {/* Goal progress -- now matches the wellness meters' height/radius */}
+                        <View style={styles.meterBackground}>
+                          <View style={[styles.meterFill, { width: `${pct}%`, backgroundColor: goal.color }]} />
+                        </View>
+                        <Text style={[styles.goalDeadline, { marginTop: 6 }]}>{goal.deadline} · {Math.round(pct)}% complete</Text>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+
+              {/* Premium Weekly Spending Chart */}
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                  <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING</Text>
+                  <Text style={styles.subtleText}>
+                    Total: ₹{Math.round(monthlyWeeklyData[activeWeekIndex]?.data.reduce((a, b) => a + b.amount, 0) || 0).toLocaleString('en-IN')}
+                  </Text>
+                </View>
+
+                {/* Week Selector */}
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{ flexDirection: 'row', marginBottom: 16, maxHeight: 36 }}
+                  contentContainerStyle={{ alignItems: 'center' }}
+                >
+                  {monthlyWeeklyData.map((week, i) => (
+                    <TouchableOpacity
+                      key={i}
+                      activeOpacity={0.8}
+                      style={[styles.weekChip, activeWeekIndex === i && styles.weekChipActive, { marginRight: 8 }]}
+                      onPress={() => { setActiveWeekIndex(i); setActiveDay(null); }}
+                    >
+                      <Text style={[styles.weekChipText, activeWeekIndex === i && styles.weekChipTextActive]}>Week {week.weekNum}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+
+                {/* The Chart (Direct Render) */}
+                {monthlyWeeklyData[activeWeekIndex] && (
+                  <PremiumChart
+                    data={monthlyWeeklyData[activeWeekIndex].data}
+                    activeDay={activeDay}
+                    setActiveDay={setActiveDay}
+                    maxValue={globalMaxSpend}
+                  />
+                )}
               </View>
             </View>
           )}
@@ -749,6 +1025,7 @@ export default function App() {
           userLabels={userLabels}
         />
       )}
+
       {/* AI Daily Morning Briefing Modal */}
       <Modal
         animationType="slide"
@@ -780,6 +1057,67 @@ export default function App() {
                 </TouchableOpacity>
               </>
             )}
+          </View>
+        </View>
+      </Modal>
+
+      {/* Add Goal Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showAddGoalModal}
+        onRequestClose={() => setShowAddGoalModal(false)}
+      >
+        <View style={styles.briefingOverlay}>
+          <View style={styles.briefingCard}>
+            <Text style={styles.briefingTitle}>Create a Goal</Text>
+
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, alignSelf: 'flex-start' }}>GOAL NAME</Text>
+            <TextInput
+              style={styles.goalInput}
+              placeholder="e.g. Iceland Trip"
+              placeholderTextColor="#5A5A60"
+              value={newGoalName}
+              onChangeText={setNewGoalName}
+            />
+
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, marginTop: 16, alignSelf: 'flex-start' }}>TARGET AMOUNT (₹)</Text>
+            <TextInput
+              style={styles.goalInput}
+              placeholder="e.g. 50000"
+              placeholderTextColor="#5A5A60"
+              keyboardType="numeric"
+              value={newGoalTarget}
+              onChangeText={setNewGoalTarget}
+            />
+
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, marginTop: 16, alignSelf: 'flex-start' }}>AMOUNT SAVED SO FAR (₹)</Text>
+            <TextInput
+              style={styles.goalInput}
+              placeholder="e.g. 10000"
+              placeholderTextColor="#5A5A60"
+              keyboardType="numeric"
+              value={newGoalCurrent}
+              onChangeText={setNewGoalCurrent}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%', marginTop: 24 }}>
+              <TouchableOpacity
+                style={[styles.briefingButton, { backgroundColor: 'rgba(255,255,255,0.1)', flex: 1, shadowOpacity: 0 }]}
+                activeOpacity={0.8}
+                onPress={() => setShowAddGoalModal(false)}
+              >
+                <Text style={[styles.briefingButtonText, { color: C.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.briefingButton, { flex: 1 }]}
+                activeOpacity={0.85}
+                onPress={handleAddGoal}
+              >
+                <Text style={styles.briefingButtonText}>Save Goal</Text>
+              </TouchableOpacity>
+            </View>
+
           </View>
         </View>
       </Modal>
@@ -821,7 +1159,7 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
-  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 50 },
+  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 60 },
   onboardingContent: { flex: 1, justifyContent: 'center' },
   logo: { color: C.textPrimary, fontSize: 32, fontWeight: '700', marginBottom: 20, letterSpacing: -0.5 },
   onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34, letterSpacing: -0.5 },
@@ -867,12 +1205,14 @@ const styles = StyleSheet.create({
 
   ringWrap: { width: 108, height: 108, justifyContent: 'center', alignItems: 'center', marginRight: 20 },
 
-  // Meters
+  // Meters -- also reused for the Forecast risk bar and Goal progress
+  // bars now, so every progress indicator in the app shares one visual
+  // family instead of three slightly different bar styles.
   meterContainer: { marginBottom: 15 },
   meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7 },
   meterLabel: { color: C.textSecondary, fontSize: 12.5 },
   meterValue: { color: C.textPrimary, fontSize: 12.5, fontWeight: '600' },
-  meterBackground: { height: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
+  meterBackground: { height: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', marginTop: 4 },
   meterFill: { height: '100%', borderRadius: 999 },
 
   // Subscription Leaks
@@ -1002,16 +1342,97 @@ const styles = StyleSheet.create({
   insightText: {
     color: C.textPrimary, fontSize: 13, lineHeight: 19
   },
-  // Forecast Card
-  riskBarBackground: {
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
-    marginTop: 12
+
+  // Savings Goals
+  goalRow: { marginBottom: 18 },
+  goalName: { color: C.textPrimary, fontSize: 14, fontWeight: '600' },
+  goalMeta: { color: C.textSecondary, fontSize: 12 },
+  goalDeadline: { color: C.textSecondary, fontSize: 11 },
+  goalInput: {
+    width: '100%',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: C.border,
+    borderTopColor: C.glassHighlight,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: C.textPrimary,
+    fontSize: 15,
   },
-  riskBarFill: {
-    height: '100%',
-    borderRadius: 4
+
+  // Week Selector -- active chip now lifts slightly with its own shadow
+  weekChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    marginRight: 10,
+  },
+  weekChipActive: {
+    backgroundColor: 'rgba(56,189,248,0.15)',
+    borderColor: 'rgba(56,189,248,0.4)',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 3,
+  },
+  weekChipText: {
+    color: C.textSecondary,
+    fontSize: 12,
+    fontWeight: '600'
+  },
+  weekChipTextActive: {
+    color: C.accent,
+    fontWeight: 'bold'
+  },
+
+  // Persona Card -- icon badge now gets a glow tinted to that persona's
+  // color, added inline via shadowColor override in JSX.
+  personaIconBadge: {
+    width: 56, height: 56, borderRadius: 16, borderWidth: 1,
+    justifyContent: 'center', alignItems: 'center',
+    shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 5,
+  },
+  personaLabel: { color: C.textSecondary, fontSize: 10, fontWeight: '700', letterSpacing: 1.2, marginBottom: 4 },
+  personaName: { fontSize: 18, fontWeight: '800', marginBottom: 4 },
+  personaDesc: { color: C.textSecondary, fontSize: 12, lineHeight: 17 },
+
+  // Heatmap
+  heatmapGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    justifyContent: 'space-between',
+  },
+  heatmapCell: {
+    width: 26,
+    height: 26,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  heatmapLegend: {
+    color: C.textSecondary, fontSize: 10, fontWeight: '600'
+  },
+  heatmapSelectedText: {
+    color: C.textPrimary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  // Expanded repetitive-payment detail list -- now reads as "a drawer
+  // opening from the row above it" via a colored left accent border,
+  // instead of a disconnected plain list.
+  expandedList: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    gap: 8,
+    marginLeft: 4,
+    borderLeftWidth: 2,
+    borderLeftColor: 'rgba(245,158,11,0.35)',
+  },
+  expandedText: {
+    color: C.textSecondary,
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
