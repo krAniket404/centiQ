@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share
+  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
@@ -22,20 +22,23 @@ import { getScoreColor as getDynamicScoreColor } from './src/theme/scoreColor';
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
 
-// Exact Figma Design Tokens
+// Refined design tokens -- same accent hues, tuned for real depth. Still
+// pure View/StyleSheet, zero new dependencies.
 const C = {
   bg: "#080808",
-  glass: "rgba(255,255,255,0.07)",
-  glassStrong: "rgba(255,255,255,0.10)",
-  border: "rgba(255,255,255,0.13)",
-  borderStrong: "rgba(255,255,255,0.18)",
+  glass: "rgba(255,255,255,0.05)",
+  glassStrong: "rgba(255,255,255,0.08)",
+  glassHighlight: "rgba(255,255,255,0.22)", // borderTopColor only -- the "light on glass edge" trick
+  border: "rgba(255,255,255,0.10)",
+  borderStrong: "rgba(255,255,255,0.14)",
   textPrimary: "#FFFFFF",
-  textSecondary: "#B8B8B8",
+  textSecondary: "#9A9AA0",
   accent: "#38BDF8",
   success: "#10B981",
   warning: "#F59E0B",
   danger: "#EF4444",
-  purple: "#8B5CF6"
+  purple: "#8B5CF6",
+  shadow: "#000000",
 };
 
 export default function App() {
@@ -106,21 +109,6 @@ export default function App() {
     // Run when app opens
     checkPendingNotif();
 
-  const handleShareScore = async () => {
-    const profileTag = scores.impulse > 60 ? 'Impulsive Planner' : 'Disciplined Saver';
-
-    const shareMessage = `My CentiQ Financial Wellness Score is ${scores.wellness}/100! 🧠💸\n\nI'm officially an "${profileTag}".\n\nCentiQ analyzes my SMS to explain WHY I spend money, not just where it goes. Stop just tracking expenses, start decoding your behavior. 🚀\n\n#CentiQ #BehavioralFinance`;
-
-    try {
-      const result = await Share.share({
-        message: shareMessage,
-        title: 'My CentiQ Wellness Score',
-      });
-    } catch (error: any) {
-      Alert.alert('Error', error.message);
-    }
-  };
-
     // Run when app returns to foreground
     const subscription = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
@@ -177,6 +165,50 @@ export default function App() {
       { day: 'Fri', amount: spendByDay[5] }, { day: 'Sat', amount: spendByDay[6] },
       { day: 'Sun', amount: spendByDay[0] },
     ];
+  }, [transactions]);
+
+  // Calculate Monthly Forecast & Overspend Risk
+  const monthlyForecast = useMemo(() => {
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+
+    const monthTxns = transactions.filter(t =>
+      t.type === 'debit' &&
+      t.date.getMonth() === now.getMonth() &&
+      t.date.getFullYear() === now.getFullYear()
+    );
+
+    const spentSoFar = monthTxns.reduce((a, b) => a + b.amount, 0);
+    const monthlyIncome = transactions.filter(t =>
+      t.type === 'credit' &&
+      t.date.getMonth() === now.getMonth() &&
+      t.date.getFullYear() === now.getFullYear()
+    ).reduce((a, b) => a + b.amount, 0);
+
+    // Calculate average daily spend so far
+    const avgDailySpend = dayOfMonth > 0 ? spentSoFar / dayOfMonth : 0;
+
+    // Project that to the end of the month
+    const projectedSpend = avgDailySpend * daysInMonth;
+
+    // Calculate Risk Percentage (How much of your income will be consumed?)
+    // If projected spend > income, risk is 100%+
+    const riskRatio = monthlyIncome > 0 ? (projectedSpend / monthlyIncome) : 0;
+    const overspendRisk = Math.max(0, Math.min(100, Math.round(riskRatio * 100)));
+
+    // Determine risk level for UI color
+    let riskLevel = 'Low';
+    let riskColor = C.success;
+    if (overspendRisk > 85) { riskLevel = 'High'; riskColor = C.danger; }
+    else if (overspendRisk > 65) { riskLevel = 'Moderate'; riskColor = C.warning; }
+
+    return {
+      projectedSpend: Math.round(projectedSpend),
+      overspendRisk,
+      riskLevel,
+      riskColor
+    };
   }, [transactions]);
 
   const recurringCharges = useMemo(() => {
@@ -448,7 +480,7 @@ export default function App() {
           <Text style={styles.onboardingTitle}>Understand your money habits.</Text>
           <Text style={styles.onboardingSubtext}>Not just where you spend, but why. Connect your SMS to unlock your behavioral profile.</Text>
         </View>
-        <TouchableOpacity style={styles.primaryButton} onPress={requestPermission}>
+        <TouchableOpacity style={styles.primaryButton} activeOpacity={0.85} onPress={requestPermission}>
           <Text style={styles.primaryButtonText}>Connect SMS</Text>
         </TouchableOpacity>
       </View>
@@ -462,11 +494,11 @@ export default function App() {
         <View style={styles.onboardingContent}>
           <Text style={styles.logo}>Choose your style</Text>
           <Text style={styles.onboardingSubtext}>How do you want CentiQ to analyze your spending?</Text>
-          <TouchableOpacity style={[styles.modeCard, { borderColor: C.danger }]} onPress={() => { setMode('strict'); saveState({ mode: 'strict' }); }}>
+          <TouchableOpacity style={[styles.modeCard, { borderColor: 'rgba(239,68,68,0.4)' }]} activeOpacity={0.85} onPress={() => { setMode('strict'); saveState({ mode: 'strict' }); }}>
             <Text style={styles.modeTitle}>Strict Mode</Text>
             <Text style={styles.modeText}>Judges spending against standard population benchmarks. No excuses, pure math.</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.modeCard, { borderColor: C.success }]} onPress={() => { setMode('liberal'); saveState({ mode: 'liberal' }); }}>
+          <TouchableOpacity style={[styles.modeCard, { borderColor: 'rgba(16,185,129,0.4)' }]} activeOpacity={0.85} onPress={() => { setMode('liberal'); saveState({ mode: 'liberal' }); }}>
             <Text style={styles.modeTitle}>Liberal Mode</Text>
             <Text style={styles.modeText}>If you're happy with a purchase, we exclude it from your impulsivity score. You define your own discipline.</Text>
           </TouchableOpacity>
@@ -483,7 +515,7 @@ export default function App() {
         <FlatList
           data={[]}
           renderItem={null}
-          contentContainerStyle={{ paddingBottom: 100 }}
+          contentContainerStyle={{ paddingBottom: 110 }}
           ListHeaderComponent={() => (
             <View>
               <View style={styles.headerRow}>
@@ -491,31 +523,23 @@ export default function App() {
                   <Text style={styles.greeting}>Welcome back</Text>
                   <Text style={styles.headerTitle}>Your money, decoded.</Text>
                 </View>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                  {/* NEW SHARE BUTTON */}
-                  <TouchableOpacity style={styles.shareButton} activeOpacity={0.8} onPress={handleShareScore}>
-                    <Text style={styles.shareButtonText}>Share</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
-                    <View style={styles.syncDot} />
-                    <Text style={styles.syncText}>Reset</Text>
-                  </TouchableOpacity>
-                </View>
+                <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
+                  <View style={styles.syncDot} />
+                  <Text style={styles.syncText}>Reset</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Financial Wellness Card (Heavy Glass) */}
-              <View style={[styles.glassCardHeavy, { padding: 22, marginBottom: 16 }]}>
-                <Text style={[styles.cardHeaderTitle, { marginBottom: 20 }]}>FINANCIAL WELLNESS</Text>
+              <View style={[styles.glassCardHeavy, { padding: 24, marginBottom: 18 }]}>
+                <Text style={[styles.cardHeaderTitle, { marginBottom: 22 }]}>FINANCIAL WELLNESS</Text>
 
                 <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                   {/* Left Side: Circle */}
-                  <View style={{ width: 100, height: 100, justifyContent: 'center', alignItems: 'center', marginRight: 20 }}>
+                  <View style={styles.ringWrap}>
                     <CircularScoreCard score={scores.wellness} label="Score" color={getDynamicScoreColor(scores.wellness, 'higher_is_better')} size={100} />
                   </View>
 
-                  {/* Right Side: Meters (Removed fixed height to prevent overlap) */}
+                  {/* Right Side: Meters */}
                   <View style={{ flex: 1, justifyContent: 'center' }}>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline</Text><Text style={styles.meterValue}>{scores.discipline}/100</Text></View>
@@ -538,25 +562,30 @@ export default function App() {
               </View>
 
               {/* Digital Subscriptions Card (Always Visible) */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(56,189,248,0.25)' }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>🎬 SUBSCRIPTIONS</Text>
+              <View style={[styles.glassCard, { padding: 22, marginBottom: 16, borderColor: 'rgba(56,189,248,0.22)' }]}>
+                <View style={styles.cardTopRow}>
+                  <View style={styles.cardTitleWithIcon}>
+                    <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)' }]}>
+                      <Text style={styles.iconBadgeGlyph}>🎬</Text>
+                    </View>
+                    <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>SUBSCRIPTIONS</Text>
+                  </View>
                   {recurringCharges.knownSubscriptions.length > 0 && (
-                    <Text style={{ color: C.accent, fontSize: 14, fontWeight: 'bold' }}>₹{recurringCharges.totalSubsCost.toLocaleString('en-IN')}/mo</Text>
+                    <Text style={styles.cardTopRowValue}>₹{recurringCharges.totalSubsCost.toLocaleString('en-IN')}/mo</Text>
                   )}
                 </View>
 
                 {recurringCharges.knownSubscriptions.length === 0 ? (
-                  <View style={{ alignItems: 'center', paddingVertical: 10 }}>
+                  <View style={{ alignItems: 'center', paddingVertical: 14 }}>
                     <Text style={{ fontSize: 28, marginBottom: 8 }}>🎉</Text>
-                    <Text style={{ color: C.success, fontSize: 14, fontWeight: 'bold', marginBottom: 6 }}>NO SUBSCRIPTION LEAKS</Text>
-                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 18 }}>
+                    <Text style={{ color: C.success, fontSize: 13.5, fontWeight: '700', marginBottom: 6, letterSpacing: 0.4 }}>NO SUBSCRIPTION LEAKS</Text>
+                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
                       Great job! We didn't find any sneaky digital subscriptions in your history. Keep it up!
                     </Text>
                   </View>
                 ) : (
                   <>
-                    <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+                    <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
                       You have {recurringCharges.knownSubscriptions.length} active digital subscriptions.
                     </Text>
                     {recurringCharges.knownSubscriptions.map((l, i) => (
@@ -574,12 +603,17 @@ export default function App() {
 
               {/* Repetitive Payments Card (Only if they exist) */}
               {recurringCharges.repetitivePayments.length > 0 && (
-                <View style={[styles.glassCard, { padding: 20, marginBottom: 16, borderColor: 'rgba(245,158,11,0.25)' }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                    <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.warning }]}>⚠️ REPETITIVE PAYMENTS</Text>
-                    <Text style={{ color: C.warning, fontSize: 14, fontWeight: 'bold' }}>₹{recurringCharges.totalRepetitiveCost.toLocaleString('en-IN')}/mo</Text>
+                <View style={[styles.glassCard, { padding: 22, marginBottom: 16, borderColor: 'rgba(245,158,11,0.22)' }]}>
+                  <View style={styles.cardTopRow}>
+                    <View style={styles.cardTitleWithIcon}>
+                      <View style={[styles.iconBadge, { backgroundColor: 'rgba(245,158,11,0.14)' }]}>
+                        <Text style={styles.iconBadgeGlyph}>⚠️</Text>
+                      </View>
+                      <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.warning }]}>REPETITIVE PAYMENTS</Text>
+                    </View>
+                    <Text style={[styles.cardTopRowValue, { color: C.warning }]}>₹{recurringCharges.totalRepetitiveCost.toLocaleString('en-IN')}/mo</Text>
                   </View>
-                  <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 16, lineHeight: 18 }}>
+                  <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
                     We detected {recurringCharges.repetitivePayments.length} recurring charges (bills, rent, gyms, etc).
                   </Text>
 
@@ -596,14 +630,14 @@ export default function App() {
               )}
 
               {/* Bar Chart */}
-              <View style={[styles.glassCard, { padding: 22 }]}>
+              <View style={[styles.glassCard, { padding: 22, marginBottom: 16 }]}>
                 <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (BARS)</Text>
                 <View style={styles.chartContainer}>
                   {weeklyData.map((item, i) => {
                     const maxVal = Math.max(...weeklyData.map(d => Number(d.amount) || 0), 1);
                     const heightPct = ((Number(item.amount) || 0) / maxVal) * 100;
                     return (
-                      <TouchableOpacity key={i} style={styles.chartBarWrapper} onPress={() => setActiveDay(activeDay === i ? null : i)}>
+                      <TouchableOpacity key={i} style={styles.chartBarWrapper} activeOpacity={0.8} onPress={() => setActiveDay(activeDay === i ? null : i)}>
                         {activeDay === i && (
                           <View style={styles.barTooltip}>
                             <Text style={styles.barTooltipText}>₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}</Text>
@@ -612,11 +646,10 @@ export default function App() {
                         <View style={styles.chartBarBg}>
                           <View style={[styles.chartBarFill, {
                             height: `${heightPct}%`,
-                            backgroundColor: activeDay === i ? C.accent : 'rgba(56,189,248,0.3)',
-                            borderTopLeftRadius: 6, borderTopRightRadius: 6
+                            backgroundColor: activeDay === i ? C.accent : 'rgba(56,189,248,0.28)',
                           }]} />
                         </View>
-                        <Text style={styles.chartDayLabel}>{item.day}</Text>
+                        <Text style={[styles.chartDayLabel, activeDay === i && { color: C.accent, fontWeight: '700' }]}>{item.day}</Text>
                       </TouchableOpacity>
                     );
                   })}
@@ -644,9 +677,47 @@ export default function App() {
                   </ScrollView>
                 </View>
               )}
+              {/* AI Monthly Forecast Card */}
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                  <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)', marginRight: 12 }]}>
+                    <Text style={styles.iconBadgeGlyph}>📈</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.cardHeaderTitle}>NEXT MONTH FORECAST</Text>
+                    <Text style={styles.subtleText}>Based on your current spending velocity</Text>
+                  </View>
+                </View>
 
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <View>
+                    <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Projected Spend</Text>
+                    <Text style={{ color: C.textPrimary, fontSize: 22, fontWeight: '800' }}>
+                      ₹{monthlyForecast.projectedSpend.toLocaleString('en-IN')}
+                    </Text>
+                  </View>
+
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Overspend Risk</Text>
+                    <Text style={{ color: monthlyForecast.riskColor, fontSize: 22, fontWeight: '800' }}>
+                      {monthlyForecast.overspendRisk}%
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Risk Bar */}
+                <View style={styles.riskBarBackground}>
+                  <View style={[
+                    styles.riskBarFill,
+                    { width: `${monthlyForecast.overspendRisk}%`, backgroundColor: monthlyForecast.riskColor }
+                  ]} />
+                </View>
+                <Text style={{ color: monthlyForecast.riskColor, fontSize: 11, fontWeight: '700', marginTop: 8, textAlign: 'right' }}>
+                  {monthlyForecast.riskLevel.toUpperCase()} RISK
+                </Text>
+              </View>
               {/* Premium Weekly Spending Chart */}
-              <View style={[styles.glassCard, { padding: 22, marginTop: 16 }]}>
+              <View style={[styles.glassCard, { padding: 22 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING (TREND)</Text>
                   <Text style={styles.subtleText}>₹{Math.round(weeklyData.reduce((a,b) => a + b.amount, 0)).toLocaleString('en-IN')}</Text>
@@ -687,7 +758,10 @@ export default function App() {
       >
         <View style={styles.briefingOverlay}>
           <View style={styles.briefingCard}>
-            <Text style={styles.briefingTitle}>☀️ Good Morning</Text>
+            <View style={styles.briefingIconRing}>
+              <Text style={styles.briefingIconGlyph}>☀️</Text>
+            </View>
+            <Text style={styles.briefingTitle}>Good Morning</Text>
 
             {isFetchingBriefing ? (
               <View style={{ paddingVertical: 20, alignItems: 'center' }}>
@@ -699,6 +773,7 @@ export default function App() {
                 <Text style={styles.briefingText}>{morningBriefing}</Text>
                 <TouchableOpacity
                   style={styles.briefingButton}
+                  activeOpacity={0.85}
                   onPress={() => setShowBriefing(false)}
                 >
                   <Text style={styles.briefingButtonText}>Let's go</Text>
@@ -711,27 +786,32 @@ export default function App() {
 
       {/* Tab Bar */}
       <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('dashboard')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('dashboard')}>
+          {activeTab === 'dashboard' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'dashboard' && styles.tabIconActive]}>◉</Text>
           <Text style={[styles.tabLabel, activeTab === 'dashboard' && styles.tabLabelActive]}>Dashboard</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('transactions')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('transactions')}>
+          {activeTab === 'transactions' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'transactions' && styles.tabIconActive]}>≣</Text>
           <Text style={[styles.tabLabel, activeTab === 'transactions' && styles.tabLabelActive]}>Transactions</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('budgets')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('budgets')}>
+          {activeTab === 'budgets' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'budgets' && styles.tabIconActive]}>◍</Text>
           <Text style={[styles.tabLabel, activeTab === 'budgets' && styles.tabLabelActive]}>Budgets</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('coach')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('coach')}>
+          {activeTab === 'coach' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'coach' && styles.tabIconActive]}>✦</Text>
           <Text style={[styles.tabLabel, activeTab === 'coach' && styles.tabLabelActive]}>AI Coach</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} onPress={() => setActiveTab('settings')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('settings')}>
+          {activeTab === 'settings' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'settings' && styles.tabIconActive]}>☰</Text>
           <Text style={[styles.tabLabel, activeTab === 'settings' && styles.tabLabelActive]}>Settings</Text>
         </TouchableOpacity>
@@ -743,123 +823,175 @@ export default function App() {
 const styles = StyleSheet.create({
   darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 50 },
   onboardingContent: { flex: 1, justifyContent: 'center' },
-  logo: { color: C.textPrimary, fontSize: 32, fontWeight: 'bold', marginBottom: 20 },
-  onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34 },
-  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 22 },
-  primaryButton: { backgroundColor: C.accent, padding: 18, borderRadius: 14, alignItems: 'center', marginBottom: 20 },
-  primaryButtonText: { color: '#001018', fontSize: 16, fontWeight: 'bold' },
+  logo: { color: C.textPrimary, fontSize: 32, fontWeight: '700', marginBottom: 20, letterSpacing: -0.5 },
+  onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34, letterSpacing: -0.5 },
+  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 23 },
+  primaryButton: {
+    backgroundColor: C.accent, padding: 18, borderRadius: 16, alignItems: 'center', marginBottom: 20,
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
+  },
+  primaryButtonText: { color: '#001018', fontSize: 16, fontWeight: '700' },
 
   // Dashboard Header
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 26 },
   greeting: { color: C.textSecondary, fontSize: 13, marginBottom: 4 },
-  headerTitle: { color: C.textPrimary, fontSize: 24, fontWeight: '700' },
-  syncPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  headerTitle: { color: C.textPrimary, fontSize: 25, fontWeight: '700', letterSpacing: -0.4 },
+  syncPill: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass,
+    borderWidth: 1, borderColor: C.border, borderTopColor: C.glassHighlight,
+    paddingHorizontal: 13, paddingVertical: 7, borderRadius: 20,
+  },
   syncDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.success, marginRight: 6 },
   syncText: { color: C.textSecondary, fontSize: 12, fontWeight: '600' },
 
-  // Glass Cards
-  glassCard: { backgroundColor: C.glass, borderColor: C.border, borderWidth: 1, borderRadius: 20 },
-  glassCardHeavy: { backgroundColor: C.glassStrong, borderColor: C.borderStrong, borderWidth: 1, borderRadius: 24 },
-  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5, marginBottom: 16 },
+  // Glass Cards -- real depth via shadow, plus a lighter top border for
+  // the "light on glass edge" feel instead of a flat uniform border.
+  glassCard: {
+    backgroundColor: C.glass, borderColor: C.border, borderTopColor: C.glassHighlight,
+    borderWidth: 1, borderRadius: 22,
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.28, shadowRadius: 18, elevation: 5,
+  },
+  glassCardHeavy: {
+    backgroundColor: C.glassStrong, borderColor: C.borderStrong, borderTopColor: C.glassHighlight,
+    borderWidth: 1, borderRadius: 26,
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.32, shadowRadius: 22, elevation: 7,
+  },
+  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.6, marginBottom: 16 },
+  cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
+  cardTitleWithIcon: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  cardTopRowValue: { color: C.accent, fontSize: 14, fontWeight: '700' },
   subtleText: { color: C.textSecondary, fontSize: 12 },
 
+  iconBadge: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  iconBadgeGlyph: { fontSize: 15 },
+
+  ringWrap: { width: 108, height: 108, justifyContent: 'center', alignItems: 'center', marginRight: 20 },
+
   // Meters
-  meterContainer: { marginBottom: 14 },
-  meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
+  meterContainer: { marginBottom: 15 },
+  meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7 },
   meterLabel: { color: C.textSecondary, fontSize: 12.5 },
   meterValue: { color: C.textPrimary, fontSize: 12.5, fontWeight: '600' },
-  meterBackground: { height: 6, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden' },
+  meterBackground: { height: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
   meterFill: { height: '100%', borderRadius: 999 },
 
   // Subscription Leaks
-  leakRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.06)' },
+  leakRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
   leakMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '500' },
   leakCount: { color: C.textSecondary, fontSize: 11, marginTop: 2 },
-  leakAmount: { color: C.textPrimary, fontSize: 15, fontWeight: 'bold' },
+  leakAmount: { color: C.textPrimary, fontSize: 15, fontWeight: '700' },
 
   // Charts
   chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 140, alignItems: 'flex-end', marginTop: 20 },
   chartBarWrapper: { alignItems: 'center', width: 38, height: '100%', justifyContent: 'flex-end' },
-  barTooltip: { position: 'absolute', top: 0, backgroundColor: C.accent, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, zIndex: 10, minWidth: 50, left: -6, alignItems: 'center' },
-  barTooltipText: { color: '#001018', fontSize: 11, fontWeight: 'bold', flexWrap: 'nowrap' },
-  chartBarBg: { width: 14, height: '75%', justifyContent: 'flex-end' },
+  barTooltip: {
+    position: 'absolute', top: 0, backgroundColor: C.accent, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8,
+    zIndex: 10, minWidth: 50, left: -6, alignItems: 'center',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 4,
+  },
+  barTooltipText: { color: '#001018', fontSize: 11, fontWeight: '700', flexWrap: 'nowrap' },
+  chartBarBg: { width: 14, height: '75%', justifyContent: 'flex-end', borderRadius: 7, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.03)' },
   chartBarFill: { width: '100%' },
-  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 6 },
+  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 7 },
 
   // Mode Selection
-  modeCard: { backgroundColor: C.glass, borderWidth: 2, padding: 20, borderRadius: 18, marginBottom: 16 },
-  modeTitle: { color: C.textPrimary, fontSize: 18, fontWeight: 'bold', marginBottom: 8 },
+  modeCard: {
+    backgroundColor: C.glass, borderWidth: 1.5, padding: 22, borderRadius: 20, marginBottom: 16,
+    borderTopColor: C.glassHighlight,
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 4,
+  },
+  modeTitle: { color: C.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 8, letterSpacing: -0.2 },
   modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20 },
 
-  // Tab Bar
-  tabBar: { position: 'absolute', bottom: 0, left: 0, right: 0, height: 76, backgroundColor: 'rgba(8,8,8,0.95)', flexDirection: 'row', borderTopWidth: 1, borderTopColor: C.border, paddingBottom: 15 },
+  // Tab Bar -- active tab now gets a soft pill background, not just a
+  // color swap.
+  tabBar: {
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: 80,
+    backgroundColor: 'rgba(10,10,10,0.94)', flexDirection: 'row',
+    borderTopWidth: 1, borderTopColor: C.border, paddingBottom: 16, paddingTop: 10,
+  },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 4 },
-  tabIcon: { color: C.textSecondary, fontSize: 22 },
-  tabIconActive: { color: C.accent, fontSize: 24 },
+  tabActivePill: {
+    position: 'absolute', top: 2, width: 44, height: 30, borderRadius: 14,
+    backgroundColor: 'rgba(56,189,248,0.12)',
+  },
+  tabIcon: { color: C.textSecondary, fontSize: 21 },
+  tabIconActive: { color: C.accent, fontSize: 22 },
   tabLabel: { color: 'transparent', fontSize: 10, fontWeight: '600', height: 12 },
-  tabLabelActive: { color: C.accent, fontWeight: 'bold' },
+  tabLabelActive: { color: C.accent, fontWeight: '700' },
 
   // AI Morning Briefing Modal
   briefingOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.8)',
+    backgroundColor: 'rgba(0,0,0,0.82)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 24,
   },
   briefingCard: {
     width: '100%',
-    backgroundColor: C.glassStrong, // Dark glass
+    backgroundColor: C.glassStrong,
     borderWidth: 1,
-    borderColor: 'rgba(56,189,248,0.3)', // Neon blue border
-    borderRadius: 24,
-    padding: 28,
+    borderColor: 'rgba(56,189,248,0.28)',
+    borderTopColor: 'rgba(56,189,248,0.45)', // brighter top edge, same glass-highlight trick, tinted to the modal's own accent
+    borderRadius: 26,
+    padding: 30,
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.5,
-    shadowRadius: 20,
+    shadowColor: C.accent,
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.28,
+    shadowRadius: 26,
     elevation: 10,
   },
+  briefingIconRing: {
+    width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(56,189,248,0.12)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
+  },
+  briefingIconGlyph: { fontSize: 26 },
   briefingTitle: {
-    color: C.accent, // Neon Blue
-    fontSize: 24,
-    fontWeight: 'bold',
+    color: C.textPrimary,
+    fontSize: 22,
+    fontWeight: '700',
     marginBottom: 16,
+    letterSpacing: -0.3,
   },
   briefingText: {
-    color: C.textPrimary, // White
+    color: C.textPrimary,
     fontSize: 15,
     lineHeight: 22,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 26,
   },
   briefingButton: {
-    backgroundColor: C.accent, // Neon Blue
-    paddingVertical: 12,
+    backgroundColor: C.accent,
+    paddingVertical: 13,
     paddingHorizontal: 32,
-    borderRadius: 12,
+    borderRadius: 14,
     width: '100%',
     alignItems: 'center',
     shadowColor: C.accent,
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.6,
+    shadowOpacity: 0.5,
     shadowRadius: 10,
     elevation: 6,
   },
   briefingButtonText: {
-    color: '#001018', // Dark text on neon blue button
+    color: '#001018',
     fontSize: 15,
-    fontWeight: 'bold',
+    fontWeight: '700',
   },
-  // AI Behavior Feed
+
+  // AI Behavior Feed -- now with real depth and the same glass-edge
+  // highlight as the other cards, instead of a flat undefined border.
   insightCard: {
     width: 260,
     backgroundColor: C.glass,
     borderWidth: 1,
+    borderTopColor: C.glassHighlight,
     borderRadius: 20,
-    padding: 16,
+    padding: 18,
     marginRight: 12,
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 14, elevation: 4,
   },
   insightIconBadge: {
     width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 12
@@ -870,18 +1002,16 @@ const styles = StyleSheet.create({
   insightText: {
     color: C.textPrimary, fontSize: 13, lineHeight: 19
   },
-  // Share Button
-  shareButton: {
-    backgroundColor: 'rgba(56,189,248,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(56,189,248,0.4)',
-    paddingHorizontal: 14,
-    paddingVertical: 7,
-    borderRadius: 20,
+  // Forecast Card
+  riskBarBackground: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    overflow: 'hidden',
+    marginTop: 12
   },
-  shareButtonText: {
-    color: C.accent,
-    fontSize: 12,
-    fontWeight: '700',
+  riskBarFill: {
+    height: '100%',
+    borderRadius: 4
   },
 });
