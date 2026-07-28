@@ -81,67 +81,76 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
           const category = item.category || (item.type === 'credit' ? 'Income' : 'Other');
           const accentColor = item.type === 'credit' ? CAT_COLORS.Income : (CAT_COLORS[category] || CAT_COLORS.Other);
 
+          const isAnomaly = detectAnomaly(item, transactions).isAnomaly;
+          const impulseProb = userLabels.length >= 5 && item.type === 'debit' ? model.predict(model.extractFeatures(item, avgAmount)) : 0;
+          const isLabeled = labeledTxnIds.includes(item.id!);
+
           return (
             <View style={styles.txnCard}>
               <View style={styles.txnRow}>
                 <View style={styles.txnLeft}>
-                  <View style={[styles.avatarBox, { backgroundColor: `${accentColor}18`, borderColor: `${accentColor}30` }]}>
-                    <Text style={[styles.avatarText, { color: accentColor }]}>{firstLetter}</Text>
+                  <View style={[styles.avatarBox, { backgroundColor: accentColor }]}>
+                    <Text style={styles.avatarText}>{firstLetter}</Text>
                   </View>
 
-                  {/* Text Container with flexShrink to prevent pushing */}
                   <View style={styles.txnInfo}>
                     <Text style={styles.txnMerchant} numberOfLines={1}>{name}</Text>
                     <View style={styles.catRow}>
                       <View style={[styles.catDot, { backgroundColor: accentColor }]} />
-                      <Text style={styles.txnDate} numberOfLines={1}>{category} • {item.date.toLocaleDateString()}</Text>
+                      <Text style={styles.txnDate} numberOfLines={1}>{category} · {item.date.toLocaleDateString()}</Text>
                     </View>
                   </View>
                 </View>
 
-                {/* Right Side with flexShrink: 0 so it never squishes */}
                 <View style={styles.txnRight}>
-                  {/* ML Impulse Badge */}
-                  {userLabels.length >= 5 && item.type === 'debit' && (
-                    <View style={[styles.mlBadge, { backgroundColor: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)' }]}>
-                      <Text style={[styles.mlBadgeText, { color: model.predict(model.extractFeatures(item, avgAmount)) > 0.6 ? C.danger : C.success }]}>
-                        {Math.round(model.predict(model.extractFeatures(item, avgAmount)) * 100)}% Impulse
+                  {impulseProb > 0.4 && (
+                    <View style={[styles.mlBadge, { backgroundColor: impulseProb > 0.7 ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)' }]}>
+                      <Text style={[styles.mlBadgeText, { color: impulseProb > 0.7 ? C.danger : C.success }]}>
+                        {Math.round(impulseProb * 100)}% Impulse
                       </Text>
                     </View>
                   )}
-
-                  {/* Anomaly Badge */}
-                  {detectAnomaly(item, transactions).isAnomaly && (
-                    <View style={[styles.mlBadge, { backgroundColor: 'rgba(245,158,11,0.15)', marginTop: 4 }]}>
-                      <Text style={[styles.mlBadgeText, { color: C.warning }]}>
-                        ⚠️ Unusual
-                      </Text>
+                  {isAnomaly && (
+                    <View style={[styles.mlBadge, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
+                      <Text style={[styles.mlBadgeText, { color: C.warning }]}>⚠️ Unusual</Text>
                     </View>
                   )}
-
                   <Text style={[styles.txnAmount, { color: item.type === 'credit' ? C.success : C.textPrimary }]}>
                     {item.type === 'credit' ? '+' : '-'}₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}
                   </Text>
-                  <Text style={styles.statusText}>Done</Text>
+                  <View style={styles.statusPill}>
+                    <Text style={styles.statusText}>Done</Text>
+                  </View>
                 </View>
               </View>
 
-              {/* Liberal Mode Labeling Buttons */}
-              {item.type === 'debit' && mode === 'liberal' && userLabels.length < 15 && !labeledTxnIds.includes(item.id!) ? (
+              {/* ALWAYS show labeling buttons for debits in Liberal Mode */}
+              {item.type === 'debit' && mode === 'liberal' && (
                 <View style={styles.labelContainer}>
-                  <View style={styles.buttonRow}>
-                    <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(16,185,129,0.1)' }]} onPress={() => handleLabelTransaction(item, false)}>
-                      <Text style={[styles.labelButtonText, { color: C.success }]}>Worth it</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(239,68,68,0.1)' }]} onPress={() => handleLabelTransaction(item, true)}>
-                      <Text style={[styles.labelButtonText, { color: C.danger }]}>Impulsive</Text>
-                    </TouchableOpacity>
-                  </View>
+                  {!isLabeled ? (
+                    <>
+                      <Text style={styles.labelPrompt}>Happy with this purchase?</Text>
+                      <View style={styles.buttonRow}>
+                        <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(16,185,129,0.1)' }]} onPress={() => handleLabelTransaction(item, false)}>
+                          <Text style={[styles.labelButtonText, { color: C.success }]}>Worth it</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(239,68,68,0.1)' }]} onPress={() => handleLabelTransaction(item, true)}>
+                          <Text style={[styles.labelButtonText, { color: C.danger }]}>Impulsive</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={styles.buttonRow}>
+                      {/* Allow them to change their answer */}
+                      <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(16,185,129,0.1)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' }]} onPress={() => handleLabelTransaction(item, false)}>
+                        <Text style={[styles.labelButtonText, { color: C.success }]}>Change to Worth It</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' }]} onPress={() => handleLabelTransaction(item, true)}>
+                        <Text style={[styles.labelButtonText, { color: C.danger }]}>Change to Impulsive</Text>
+                      </TouchableOpacity>
+                    </View>
+                  )}
                 </View>
-              ) : (
-                item.type === 'debit' && mode === 'liberal' && labeledTxnIds.includes(item.id!) && userLabels.length < 15 && (
-                  <Text style={styles.thankYouText}>✓ Logged for your personal model</Text>
-                )
               )}
             </View>
           );

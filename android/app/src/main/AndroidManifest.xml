@@ -2,7 +2,7 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_SMS" />
-    <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" /> <!-- ADD THIS -->
 
     <application
         android:name=".MainApplication"
@@ -27,13 +27,14 @@
             </intent-filter>
         </activity>
 
+        <!-- SMS Background Listener -->
         <receiver android:name=".SmsReceiver" android:enabled="true" android:exported="true">
             <intent-filter android:priority="999">
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
 
-        <!-- ADD THIS NEW RECEIVER -->
+        <!-- Notification Button Listener -->
         <receiver android:name=".NotificationActionReceiver" android:enabled="true" android:exported="false">
             <intent-filter>
                 <action android:name="com.centiq.ACTION_WORTH_IT" />

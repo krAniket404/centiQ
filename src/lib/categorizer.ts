@@ -1,7 +1,7 @@
 export function categorizeMerchant(merchant: string): string {
   const m = merchant.toUpperCase();
 
-  // Groceries
+  // Groceries (Check this first!)
   if (m.includes('INSTAMART') || m.includes('BLINKIT') || m.includes('ZEPTO') || m.includes('BIGBASKET') || m.includes('GROCER') || m.includes('DMART') || m.includes('FRESH') || m.includes('RELIANCE SMART')) return 'Groceries';
 
   // Food & Dining

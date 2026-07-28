@@ -156,6 +156,43 @@ export default function App() {
     }
   }, [hasPermission, mode, transactions]);
 
+  // Check for notification button clicks when app opens
+  useEffect(() => {
+    const checkPendingNotif = async () => {
+      try {
+        const result = await SmsModule.getPendingNotifLabel();
+        if (result.status === 'found' && transactions.length > 0) {
+          // Find the most recent debit transaction
+          const recentTxn = transactions.find(t => t.type === 'debit');
+          if (recentTxn) {
+            const isImpulsive = result.isImpulsive;
+            handleLabelTransaction(recentTxn, isImpulsive);
+            Alert.alert(
+              "Model Updated",
+              `Your latest transaction was logged as ${isImpulsive ? 'Impulsive' : 'Worth It'} from the notification.`
+            );
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to check pending notif", e);
+      }
+    };
+
+    // Run when app opens
+    checkPendingNotif();
+
+    // Run when app returns to foreground
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        checkPendingNotif();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [transactions]);
+
   const avgAmount = useMemo(() => {
     if (transactions.length === 0) return 0;
     return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;

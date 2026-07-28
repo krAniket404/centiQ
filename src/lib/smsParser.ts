@@ -33,31 +33,27 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
 
   // 3. Extract Merchant / Sender based on Type
   if (type === 'credit') {
-    // For credits, look for "from VPA", "by VPA", "via VPA"
     const vpaRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
     const vpaMatch = smsBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       merchant = vpaMatch[1].trim().toUpperCase();
     } else {
-      // Look for "from NAME", "by NAME", "via NAME"
-      const fromRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]{3,30})/i;
+      const fromRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]{3,40})/i; // Expanded to 40 chars
       const fromMatch = smsBody.match(fromRegex);
       if (fromMatch && fromMatch[1]) {
-        merchant = fromMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
+        merchant = fromMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase(); // Capture up to 3 words
       }
     }
   } else {
-    // For debits, look for "to VPA", "at VPA", "via VPA"
     const vpaRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
     const vpaMatch = smsBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       merchant = vpaMatch[1].trim().toUpperCase();
     } else {
-      // Look for "to NAME", "at NAME", "via NAME"
-      const toRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]{3,30})/i;
+      const toRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]{3,40})/i; // Expanded to 40 chars
       const toMatch = smsBody.match(toRegex);
       if (toMatch && toMatch[1]) {
-        merchant = toMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
+        merchant = toMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase(); // Capture up to 3 words
       }
     }
   }

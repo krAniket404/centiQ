@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, NativeModules } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, NativeModules, ScrollView } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
 
 const { SmsModule } = NativeModules;
@@ -20,12 +20,23 @@ interface Props {
   scores: { discipline: number; impulse: number; volatility: number; wellness: number; savingsRate: number };
 }
 
+// The expanded list of suggested questions
+const SUGGESTED_QUESTIONS = [
+  "Why is my impulse score high?",
+  "How can I save money?",
+  "What is my financial persona?",
+  "How do I improve my discipline?",
+  "Are there any unusual transactions?",
+  "How much did I save this month?",
+  "What is my top spending category?",
+  "Am I overspending on weekends?"
+];
+
 export default function AICoachScreen({ transactions, scores }: Props) {
-  // Start with an empty array, we will load saved messages in useEffect
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isFetchingChat, setIsFetchingChat] = useState(true); // Prevents flicker while loading
+  const [isFetchingChat, setIsFetchingChat] = useState(true);
   const flatListRef = useRef<FlatList>(null);
 
   // 1. Load Chat History on Mount
@@ -34,20 +45,10 @@ export default function AICoachScreen({ transactions, scores }: Props) {
       try {
         const savedChat = await SmsModule.loadData(CHAT_STORAGE_KEY);
         if (savedChat) {
-          const parsedChat = JSON.parse(savedChat);
-          setMessages(parsedChat);
-        } else {
-          // If no history, show the welcome message
-          setMessages([{
-            role: 'assistant',
-            content: "Hi! I'm your CentiQ AI Coach. I run 100% offline on your device. Ask me about your wellness score, impulse index, top spending categories, or how to save money!"
-          }]);
+          setMessages(JSON.parse(savedChat));
         }
       } catch (e) {
-        setMessages([{
-          role: 'assistant',
-          content: "Hi! I'm your CentiQ AI Coach. I run 100% offline on your device. Ask me about your wellness score, impulse index, top spending categories, or how to save money!"
-        }]);
+        console.warn("Failed to load chat", e);
       } finally {
         setIsFetchingChat(false);
       }
@@ -64,6 +65,21 @@ export default function AICoachScreen({ transactions, scores }: Props) {
   }, [messages]);
 
   // The Custom Chatbot Brain
+  //
+  // FIX: intents are now checked from MOST specific to LEAST specific,
+  // instead of the previous order which put the greeting check and the
+  // generic wellness/"score" check FIRST. That caused two real bugs:
+  //   1. `msg.includes('hi')` matched inside words like "high" and "this",
+  //      hijacking real questions (e.g. "Why is my impulse score HIGH?")
+  //      into the generic greeting response.
+  //   2. `msg.includes('score')` alone matched ANY question mentioning a
+  //      specific score ("discipline score", "impulse score"), so those
+  //      always got the generic Wellness answer instead of their own.
+  // Both are fixed by trying Discipline/Impulse/Volatility/etc. first, and
+  // only falling through to the generic Wellness/score catch-all and the
+  // greeting response if nothing more specific matched. Greeting matching
+  // also now uses word-boundary regex so "hi" can't match inside "high"
+  // or "this".
   const generateBotResponse = (userText: string): string => {
     const msg = userText.toLowerCase();
 
@@ -75,12 +91,20 @@ export default function AICoachScreen({ transactions, scores }: Props) {
     const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0] || 'Food';
     const topCatAmount = Math.round(catTotals[topCat] || 0);
 
-    if (msg.includes('hi') || msg.includes('hello') || msg.includes('hey')) {
-      return "Hey there! Ready to decode your money habits? You can ask me about your scores, your spending, or ask for a tip to save money.";
+    const now = new Date();
+    const monthlyDebit = debitTxns.filter(t => t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
+    const monthlyCredit = transactions.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
+    const savedThisMonth = Math.round(monthlyCredit - monthlyDebit);
+
+    const weekendTxns = debitTxns.filter(t => t.date.getDay() === 0 || t.date.getDay() === 6);
+    const weekendSpend = weekendTxns.reduce((a, b) => a + b.amount, 0);
+
+    // 1. Discipline / Improve -- checked BEFORE the generic wellness/score
+    // catch-all, so "discipline score" no longer gets swallowed by it.
+    if (msg.includes('discipline') || msg.includes('improve')) {
+      return `Your Discipline score is ${scores.discipline}/100. To improve it, focus on making your weekly spending more consistent. Avoid weeks where you spend nothing followed by weeks where you splurge. Setting a strict weekly budget helps stabilize this metric.`;
     }
-    if (msg.includes('wellness') || msg.includes('score')) {
-      return `Your Financial Wellness Score is ${scores.wellness}/100. This is a composite score based on your discipline, impulse control, and spending volatility. ${scores.wellness >= 70 ? "You're doing great!" : "There's room for improvement."}`;
-    }
+    // 2. Impulse
     if (msg.includes('impulse') || msg.includes('impulsive')) {
       if (scores.impulse > 60) {
         return `Your Impulse Index is ${scores.impulse}/100. This is a bit high. I noticed you have several late-night transactions and same-day clusters. Try the 24-hour rule: wait a day before buying anything non-essential over ₹500.`;
@@ -88,20 +112,69 @@ export default function AICoachScreen({ transactions, scores }: Props) {
         return `Your Impulse Index is ${scores.impulse}/100. You're doing a great job controlling your impulses! Keep logging your 'Worth It' purchases so I can learn more about your habits.`;
       }
     }
-    if (msg.includes('discipline') || msg.includes('volatility')) {
-      return `Your Discipline score is ${scores.discipline}/100 and Volatility is ${scores.volatility}/100. These measure how consistent your spending is compared to your average. A lower volatility means you aren't making erratic, unpredictable purchases.`;
+    // 3. Volatility -- previously had NO handler at all, even though it's
+    // one of the four core scores. Checked here, before the generic catch-all.
+    if (msg.includes('volatility') || msg.includes('volatile') || msg.includes('consistent') || msg.includes('consistency')) {
+      return `Your Spending Volatility is ${scores.volatility}/100. This measures how much your week-to-week spending swings, rather than your monthly total. ${scores.volatility > 60 ? "Yours swings quite a bit -- try smoothing it out with a fixed weekly amount instead of one big monthly budget." : "Yours is fairly steady, which is a good sign."}`;
     }
-    if (msg.includes('spend') || msg.includes('category') || msg.includes('food') || msg.includes('shopping')) {
+    // 4. Persona
+    if (msg.includes('persona')) {
+      return `Based on your behavioral scores, the app has assigned you a specific Financial Persona (like 'The Midnight Impulser' or 'The Stealth Saver'). Check the top of your Dashboard to see your exact persona and what it means for your habits!`;
+    }
+    // 5. Unusual / Anomaly
+    if (msg.includes('unusual') || msg.includes('anomaly')) {
+      const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
+      const highValueTxns = debitTxns.filter(t => t.amount > avgAmt * 3);
+      if (highValueTxns.length > 0) {
+        return `Yes, I detected ${highValueTxns.length} transactions that were significantly larger than your average of ₹${Math.round(avgAmt)}. The largest was ₹${Math.round(highValueTxns[0].amount)} at ${highValueTxns[0].merchant}.`;
+      }
+      return "Good news! I haven't detected any statistically unusual transactions in your history. Your spending seems to be within your normal range.";
+    }
+    // 6. Saved this month
+    if (msg.includes('save this month') || msg.includes('saved this month') || msg.includes('savings')) {
+      if (savedThisMonth >= 0) {
+        return `So far this month, you have saved ₹${savedThisMonth.toLocaleString('en-IN')} (Income minus Expenses). That's a savings rate of ${Math.round(scores.savingsRate)}%.`;
+      } else {
+        return `Uh oh! You are currently over budget for this month by ₹${Math.abs(savedThisMonth).toLocaleString('en-IN')}. Time to cut back on non-essential spending.`;
+      }
+    }
+    // 7. Top Category
+    if (msg.includes('category') || msg.includes('spend') || msg.includes('food') || msg.includes('shopping')) {
       return `Looking at your debits, your top spending category is ${topCat}. You've spent approximately ₹${topCatAmount.toLocaleString('en-IN')} there. If you want to save money, cutting back here by just 15% would massively improve your wellness score.`;
     }
-    if (msg.includes('save') || msg.includes('saving') || msg.includes('advice') || msg.includes('tip')) {
-      return `Here is a pro tip: Based on your data, your weekend spending is usually higher than weekdays. Try setting a strict 'weekend cash envelope'—withdraw ₹2000 on Friday and don't use your card for the weekend. This creates a hard visual limit.`;
+    // 8. Weekend
+    if (msg.includes('weekend')) {
+      const pct = totalSpend > 0 ? Math.round((weekendSpend / totalSpend) * 100) : 0;
+      if (pct > 40) {
+        return `Yes, you tend to overspend on weekends. ${pct}% of your total spending happens on Saturday and Sunday. Try setting a strict 'weekend cash envelope'—withdraw ₹2000 on Friday and don't use your card for the weekend.`;
+      }
+      return `Your weekend spending looks fairly balanced. Only ${pct}% of your total spend happens on weekends, which means you distribute your purchases well throughout the week.`;
     }
-    if (msg.includes('subscription') || msg.includes('netflix') || msg.includes('spotify')) {
-      return "Check the Subscriptions card on your Dashboard! I scan your history for recurring identical charges. If you see subscriptions you don't use anymore, canceling them is the fastest way to boost your savings rate.";
+    // 9. Tip / Advice -- FIX: previously only matched "tip" or "advice",
+    // so the suggested question "How can I save money?" matched NOTHING
+    // and silently fell through to the generic fallback. Added a
+    // dedicated "save money" / "how...save" match.
+    if (msg.includes('tip') || msg.includes('advice') || msg.includes('save money') || (msg.includes('how') && msg.includes('save'))) {
+      return "Here is a pro tip: Automate your savings. The moment your salary hits your account, transfer 20% to a separate account you can't easily access. You can't spend what you don't see!";
+    }
+    // 10. Wellness -- generic catch-all, now checked AFTER all the
+    // specific metrics above, so it only fires for genuinely general
+    // questions like "how am I doing" or "what's my score" with no other
+    // specific metric named.
+    if (msg.includes('wellness') || msg.includes('score')) {
+      return `Your Financial Wellness Score is ${scores.wellness}/100. This is a composite score based on your discipline, impulse control, and spending volatility. ${scores.wellness >= 70 ? "You're doing great!" : "There's room for improvement."}`;
+    }
+    // 11. Greeting -- moved to run LAST among real intents (right before
+    // the fallback), and now uses word-boundary regex instead of raw
+    // substring matching, so "hi" can no longer match inside "high" or
+    // "this". Real questions get a real answer first; only a genuine
+    // greeting with no other recognizable content lands here.
+    if (/\b(hi|hello|hey)\b/i.test(userText)) {
+      return "Hey there! Ready to decode your money habits? You can ask me about your scores, your spending, or ask for a tip to save money.";
     }
 
-    return "I can analyze your wellness, impulse index, top spending categories, or give you savings tips. Try asking: 'Why is my impulse score high?' or 'How can I save money?'";
+    // Fallback
+    return "I can analyze your wellness, impulse index, persona, unusual transactions, or give you savings tips. Try asking one of the suggested questions below!";
   };
 
   const sendMessage = async (textToSend?: string) => {
@@ -128,7 +201,6 @@ export default function AICoachScreen({ transactions, scores }: Props) {
     }
   }, [messages, isLoading]);
 
-  // Don't render the list until chat is loaded to prevent flicker
   if (isFetchingChat) {
     return <View style={{ flex: 1, backgroundColor: C.bg, justifyContent: 'center', alignItems: 'center' }}><ActivityIndicator color={C.accent} size="large" /></View>;
   }
@@ -149,22 +221,41 @@ export default function AICoachScreen({ transactions, scores }: Props) {
         </View>
       </View>
 
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={(item, index) => index.toString()}
-        contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 100 }}
-        renderItem={({ item }) => (
-          <View style={[
-            styles.messageBubble,
-            item.role === 'user' ? styles.userBubble : styles.aiBubble
-          ]}>
-            <Text style={item.role === 'user' ? styles.userText : styles.aiText}>
-              {item.content}
+      {/* Chat List or Empty State */}
+      {messages.length === 0 ? (
+        <View style={{ flex: 1, paddingHorizontal: 4 }}>
+          <View style={styles.emptyStateBubble}>
+            <Text style={styles.emptyStateText}>
+              Hi! I'm your CentiQ AI Coach. I run 100% offline on your device. Ask me about your wellness score, impulse index, top spending categories, or how to save money!
             </Text>
           </View>
-        )}
-      />
+          <Text style={[styles.cardHeaderTitle, { marginTop: 20, marginBottom: 12 }]}>SUGGESTED QUESTIONS</Text>
+          <ScrollView showsVerticalScrollIndicator={false}>
+            {SUGGESTED_QUESTIONS.map((q, i) => (
+              <TouchableOpacity key={i} style={styles.suggestedChip} onPress={() => sendMessage(q)}>
+                <Text style={styles.suggestedChipText}>{q}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item, index) => index.toString()}
+          contentContainerStyle={{ paddingHorizontal: 4, paddingBottom: 100 }}
+          renderItem={({ item }) => (
+            <View style={[
+              styles.messageBubble,
+              item.role === 'user' ? styles.userBubble : styles.aiBubble
+            ]}>
+              <Text style={item.role === 'user' ? styles.userText : styles.aiText}>
+                {item.content}
+              </Text>
+            </View>
+          )}
+        />
+      )}
 
       {isLoading && (
         <View style={styles.loadingContainer}>
@@ -192,6 +283,21 @@ export default function AICoachScreen({ transactions, scores }: Props) {
 
 const styles = StyleSheet.create({
   headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '700', paddingHorizontal: 4 },
+  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
+
+  // Empty State
+  emptyStateBubble: {
+    backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderRadius: 18, borderBottomLeftRadius: 4,
+    padding: 16, maxWidth: '90%',
+  },
+  emptyStateText: { color: C.textPrimary, fontSize: 14, lineHeight: 21 },
+  suggestedChip: {
+    borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', backgroundColor: 'rgba(56,189,248,0.08)',
+    borderRadius: 14, paddingVertical: 12, paddingHorizontal: 16, marginBottom: 10, alignSelf: 'flex-start',
+  },
+  suggestedChipText: { color: C.accent, fontSize: 13 },
+
+  // Messages
   messageBubble: {
     maxWidth: '85%',
     padding: 14,
@@ -241,7 +347,7 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    marginBottom: 20,
+    marginBottom: 100,
   },
   input: {
     flex: 1,
