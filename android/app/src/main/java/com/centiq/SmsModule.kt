@@ -103,7 +103,7 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
             }
         }.start()
     }
-    
+
     @ReactMethod
     fun saveData(key: String, value: String, promise: Promise) {
         try {

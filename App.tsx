@@ -17,7 +17,7 @@ import { supabase } from './src/lib/supabase';
 import AuthScreen from './src/screens/AuthScreen';
 import { Session } from '@supabase/supabase-js';
 import { getScoreColor as getDynamicScoreColor } from './src/theme/scoreColor';
-
+import PaywallScreen from './src/screens/PaywallScreen';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -49,6 +49,11 @@ export default function App() {
   const [newGoalCurrent, setNewGoalCurrent] = useState('');
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showAllRepetitive, setShowAllRepetitive] = useState(false);
+  const [showMonthlyWrap, setShowMonthlyWrap] = useState(false);
+  const [isPro, setIsPro] = useState(false);
+  const [isSubscribing, setIsSubscribing] = useState(false);
+  const [depositGoalId, setDepositGoalId] = useState<string | null>(null);
+  const [depositAmount, setDepositAmount] = useState('');
 
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
@@ -77,9 +82,28 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null);
 
   // --- ALL HOOKS MUST BE HERE, AT THE TOP LEVEL ---
+
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
+      if (session?.user) {
+        // Fetch Pro Status
+        supabase
+          .from('profiles')
+          .select('subscription_status, trial_end_date')
+          .eq('id', session.user.id)
+          .single()
+          .then(({ data }) => {
+            if (data?.subscription_status === 'trialing' || data?.subscription_status === 'active') {
+              // Check if trial expired
+              if (data.subscription_status === 'trialing' && data.trial_end_date && new Date(data.trial_end_date) < new Date()) {
+                setIsPro(false); // Trial expired
+              } else {
+                setIsPro(true);
+              }
+            }
+          });
+      }
     });
     supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
@@ -408,6 +432,24 @@ export default function App() {
     return { persona, heatmap: days };
   }, [scores, transactions, avgAmount, recurringCharges]); // Added recurringCharges to dependencies
 
+  // Calculate Monthly Wrap Data
+  const monthlyWrapData = useMemo(() => {
+    const now = new Date();
+    const debitTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear());
+    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+
+    const catTotals: { [key: string]: number } = {};
+    debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
+    const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0] || 'N/A';
+
+    // Find biggest impulse (highest amount late at night or > 1.5x avg)
+    const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
+    const impulseTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4 || t.amount > avgAmt * 1.5);
+    const biggestImpulse = impulseTxns.sort((a, b) => b.amount - a.amount)[0];
+
+    return { totalSpend, topCat, biggestImpulse, persona: behavioralProfile.persona };
+  }, [transactions, behavioralProfile]);
+
   // --- FUNCTIONS START HERE ---
   const loadSavedData = async () => {
     try {
@@ -559,6 +601,24 @@ export default function App() {
     setIsRefreshing(false);
   };
 
+  const handleLabelTransaction = (txn: ParsedTransaction, isImpulsive: boolean) => {
+    const features = model.extractFeatures(txn, avgAmount);
+    const newLabel: UserLabel = { txnFeatures: features, isImpulsive: isImpulsive ? 1 : 0 };
+    const updatedLabels = [...userLabels, newLabel];
+    const updatedLabeledIds = [...labeledTxnIds, txn.id!];
+    const updatedWorthIt = isImpulsive ? worthItTxnIds : [...worthItTxnIds, txn.id!];
+
+    setUserLabels(updatedLabels); setLabeledTxnIds(updatedLabeledIds); setWorthItTxnIds(updatedWorthIt);
+    model.train(updatedLabels);
+
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    const liberalTxns = debitTxns.filter(t => !updatedWorthIt.includes(t.id!));
+    const newImpulse = calculateImpulseIndex(liberalTxns);
+    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
+    setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
+    saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
+  };
+
   const syncToCloud = async (txns: ParsedTransaction[]) => {
     const userId = session?.user?.id || '00000000-0000-0000-0000-000000000000';
     const payload = txns.map(t => ({
@@ -582,22 +642,43 @@ export default function App() {
     }
   };
 
-  const handleLabelTransaction = (txn: ParsedTransaction, isImpulsive: boolean) => {
-    const features = model.extractFeatures(txn, avgAmount);
-    const newLabel: UserLabel = { txnFeatures: features, isImpulsive: isImpulsive ? 1 : 0 };
-    const updatedLabels = [...userLabels, newLabel];
-    const updatedLabeledIds = [...labeledTxnIds, txn.id!];
-    const updatedWorthIt = isImpulsive ? worthItTxnIds : [...worthItTxnIds, txn.id!];
+  const handleStartTrial = async () => {
+    setIsSubscribing(true);
+    try {
+      const trialEnd = new Date();
+      trialEnd.setDate(trialEnd.getDate() + 7); // 7 days from now
 
-    setUserLabels(updatedLabels); setLabeledTxnIds(updatedLabeledIds); setWorthItTxnIds(updatedWorthIt);
-    model.train(updatedLabels);
+      await supabase
+        .from('profiles')
+        .upsert({
+          id: session?.user?.id,
+          subscription_status: 'trialing',
+          trial_end_date: trialEnd.toISOString()
+        });
 
-    const debitTxns = transactions.filter(t => t.type === 'debit');
-    const liberalTxns = debitTxns.filter(t => !updatedWorthIt.includes(t.id!));
-    const newImpulse = calculateImpulseIndex(liberalTxns);
-    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
-    setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
-    saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
+      setIsPro(true);
+      Alert.alert("Pro Unlocked! 🎉", "Your 7-day free trial has started. Enjoy CentiQ Pro!");
+    } catch (e) {
+      Alert.alert("Error", "Failed to start trial.");
+    } finally {
+      setIsSubscribing(false);
+    }
+  };
+
+  const handleDepositFunds = () => {
+    if (!depositAmount || !depositGoalId) return;
+
+    const updatedGoals = goals.map(g =>
+      g.id === depositGoalId
+        ? { ...g, current: g.current + parseFloat(depositAmount) }
+        : g
+    );
+
+    setGoals(updatedGoals);
+    saveState({ goals: updatedGoals });
+
+    setDepositGoalId(null);
+    setDepositAmount('');
   };
 
   const handleAddGoal = () => {
@@ -629,10 +710,10 @@ export default function App() {
     setShowAddGoalModal(false);
   };
 
-  // TEMPORARILY BYPASS LOGIN TO TEST THE APP
-  // if (!session) {
-  //   return <AuthScreen />;
-  // }
+  //TEMPORARILY BYPASS LOGIN TO TEST THE APP
+  //if (!session) {
+  //  return <AuthScreen />;
+  //}
 
   if (!hasPermission) {
     return (
@@ -661,8 +742,19 @@ export default function App() {
             <Text style={styles.modeTitle}>Strict Mode</Text>
             <Text style={styles.modeText}>Judges spending against standard population benchmarks. No excuses, pure math.</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.modeCard, { borderColor: 'rgba(16,185,129,0.4)' }]} activeOpacity={0.85} onPress={() => { setMode('liberal'); saveState({ mode: 'liberal' }); }}>
-            <Text style={styles.modeTitle}>Liberal Mode</Text>
+          <TouchableOpacity
+            style={[styles.modeCard, { borderColor: 'rgba(16,185,129,0.4)' }]}
+            activeOpacity={0.85}
+            onPress={() => {
+              if (!isPro) {
+                setActiveTab('coach'); // Triggers the Paywall
+                return;
+              }
+              setMode('liberal');
+              saveState({ mode: 'liberal' });
+            }}
+          >
+            <Text style={styles.modeTitle}>Liberal Mode 🔒</Text>
             <Text style={styles.modeText}>If you're happy with a purchase, we exclude it from your impulsivity score. You define your own discipline.</Text>
           </TouchableOpacity>
         </View>
@@ -693,10 +785,15 @@ return (
                   <Text style={styles.greeting}>Welcome back</Text>
                   <Text style={styles.headerTitle}>Your money, decoded.</Text>
                 </View>
-                <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
-                  <View style={styles.syncDot} />
-                  <Text style={styles.syncText}>Reset</Text>
-                </TouchableOpacity>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowMonthlyWrap(true)}>
+                    <Text style={styles.wrapButtonText}>Wrap</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
+                    <View style={styles.syncDot} />
+                    <Text style={styles.syncText}>Reset</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Financial Wellness Card (Heavy Glass) */}
@@ -969,15 +1066,15 @@ return (
               {/* Savings Goals Card */}
               <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={styles.cardHeaderTitle}>SAVINGS GOALS</Text>
-                  <TouchableOpacity activeOpacity={0.75} onPress={() => setShowAddGoalModal(true)}>
-                    <Text style={{ color: C.accent, fontSize: 12, fontWeight: 'bold' }}>+ Add Goal</Text>
+                  <Text style={styles.cardHeaderTitle}>SAVINGS VAULT</Text>
+                  <TouchableOpacity onPress={() => setShowAddGoalModal(true)}>
+                    <Text style={{ color: C.accent, fontSize: 12, fontWeight: 'bold' }}>+ New Goal</Text>
                   </TouchableOpacity>
                 </View>
 
                 {goals.length === 0 ? (
                   <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10 }}>
-                    No goals yet. Tap "+ Add Goal" to start tracking!
+                    No goals yet. Tap "+ New Goal" to start your vault!
                   </Text>
                 ) : (
                   goals.map((goal) => {
@@ -988,11 +1085,19 @@ return (
                           <Text style={styles.goalName}>{goal.name}</Text>
                           <Text style={styles.goalMeta}>₹{goal.current.toLocaleString('en-IN')} / ₹{goal.target.toLocaleString('en-IN')}</Text>
                         </View>
-                        {/* Goal progress -- now matches the wellness meters' height/radius */}
-                        <View style={styles.meterBackground}>
-                          <View style={[styles.meterFill, { width: `${pct}%`, backgroundColor: goal.color }]} />
+                        <View style={styles.goalProgressBg}>
+                          <View style={[styles.goalProgressFill, { width: `${pct}%`, backgroundColor: goal.color }]} />
                         </View>
-                        <Text style={[styles.goalDeadline, { marginTop: 6 }]}>{goal.deadline} · {Math.round(pct)}% complete</Text>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                          <Text style={styles.goalDeadline}>{Math.round(pct)}% complete</Text>
+                          {/* NEW DEPOSIT BUTTON */}
+                          <TouchableOpacity
+                            style={[styles.depositButton, { borderColor: `${goal.color}50` }]}
+                            onPress={() => setDepositGoalId(goal.id)}
+                          >
+                            <Text style={[styles.depositButtonText, { color: goal.color }]}>+ Deposit</Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
                     );
                   })
@@ -1155,6 +1260,105 @@ return (
               </TouchableOpacity>
             </View>
 
+          </View>
+        </View>
+      </Modal>
+
+      {/* Deposit Funds Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={depositGoalId !== null}
+        onRequestClose={() => setDepositGoalId(null)}
+      >
+        <View style={styles.briefingOverlay}>
+          <View style={styles.briefingCard}>
+            <Text style={styles.briefingTitle}>Move to Vault</Text>
+            <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 20, textAlign: 'center' }}>
+              Lock away funds for this goal so you aren't tempted to spend them.
+            </Text>
+
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, alignSelf: 'flex-start' }}>AMOUNT TO DEPOSIT (₹)</Text>
+            <TextInput
+              style={styles.goalInput}
+              placeholder="e.g. 500"
+              placeholderTextColor="#555"
+              keyboardType="numeric"
+              value={depositAmount}
+              onChangeText={setDepositAmount}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%', marginTop: 24 }}>
+              <TouchableOpacity
+                style={[styles.briefingButton, { backgroundColor: 'rgba(255,255,255,0.1)', flex: 1 }]}
+                onPress={() => setDepositGoalId(null)}
+              >
+                <Text style={[styles.briefingButtonText, { color: C.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.briefingButton, { flex: 1 }]}
+                onPress={handleDepositFunds}
+              >
+                <Text style={styles.briefingButtonText}>Lock Funds 🔒</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Monthly Wrap Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showMonthlyWrap}
+        onRequestClose={() => setShowMonthlyWrap(false)}
+      >
+        <View style={styles.briefingOverlay}>
+          <View style={[styles.briefingCard, { padding: 24 }]}>
+            <Text style={styles.briefingTitle}>My Monthly Wrap</Text>
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 20 }}>A snapshot of your spending behavior.</Text>
+
+            <View style={styles.wrapStatRow}>
+              <Text style={styles.wrapStatLabel}>WELLNESS SCORE</Text>
+              <Text style={[styles.wrapStatValue, { color: getDynamicScoreColor(scores.wellness, 'higher_is_better') }]}>{scores.wellness}/100</Text>
+            </View>
+            <View style={styles.wrapStatRow}>
+              <Text style={styles.wrapStatLabel}>FINANCIAL PERSONA</Text>
+              <Text style={[styles.wrapStatValue, { color: C.accent }]}>{monthlyWrapData.persona.icon} {monthlyWrapData.persona.name}</Text>
+            </View>
+            <View style={styles.wrapStatRow}>
+              <Text style={styles.wrapStatLabel}>TOTAL SPENT</Text>
+              <Text style={styles.wrapStatValue}>₹{Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}</Text>
+            </View>
+            <View style={styles.wrapStatRow}>
+              <Text style={styles.wrapStatLabel}>TOP CATEGORY</Text>
+              <Text style={styles.wrapStatValue}>{monthlyWrapData.topCat}</Text>
+            </View>
+            {monthlyWrapData.biggestImpulse && (
+              <View style={styles.wrapStatRow}>
+                <Text style={styles.wrapStatLabel}>BIGGEST IMPULSE</Text>
+                <Text style={[styles.wrapStatValue, { color: C.danger, flex: 1, textAlign: 'right' }]} numberOfLines={1}>
+                  {monthlyWrapData.biggestImpulse.merchant} (₹{Math.round(monthlyWrapData.biggestImpulse.amount).toLocaleString('en-IN')})
+                </Text>
+              </View>
+            )}
+
+            <TouchableOpacity
+              style={[styles.briefingButton, { marginTop: 24 }]}
+              onPress={async () => {
+                await Share.share({
+                  message: `My CentiQ Monthly Wrap!\nWellness: ${scores.wellness}/100\nPersona: ${monthlyWrapData.persona.name}\nTotal Spent: ₹${Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}\nTop Category: ${monthlyWrapData.topCat}\n\nDecode your spending behavior with CentiQ.`
+                });
+              }}
+            >
+              <Text style={styles.briefingButtonText}>Share to Instagram/WhatsApp</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.briefingButton, { backgroundColor: 'rgba(255,255,255,0.1)', marginTop: 10 }]}
+              onPress={() => setShowMonthlyWrap(false)}
+            >
+              <Text style={[styles.briefingButtonText, { color: C.textPrimary }]}>Close</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
@@ -1472,4 +1676,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  // Monthly Wrap Button & Stats
+  wrapButton: {
+    backgroundColor: 'rgba(56,189,248,0.1)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.4)',
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+  },
+  wrapButtonText: { color: C.accent, fontSize: 12, fontWeight: '700' },
+  wrapStatRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)'
+  },
+  wrapStatLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1 },
+  wrapStatValue: { color: C.textPrimary, fontSize: 14, fontWeight: '700' },
+    // Deposit Button
+    depositButton: {
+      borderWidth: 1,
+      borderRadius: 8,
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      backgroundColor: 'rgba(255,255,255,0.03)',
+    },
+    depositButtonText: {
+      fontSize: 11,
+      fontWeight: '700',
+    },
 });
