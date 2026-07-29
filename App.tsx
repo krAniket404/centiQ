@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
-  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share, TextInput, Dimensions, RefreshControl
+  Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share, TextInput, Dimensions, RefreshControl, Vibration, Animated,
+  LayoutAnimation, UIManager, Platform
 } from 'react-native';
+import { Typography } from './src/theme/typography';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
 import { backfillHistory } from './src/lib/historicalSync';
@@ -21,6 +23,13 @@ import PaywallScreen from './src/screens/PaywallScreen';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
+
+// Enable LayoutAnimation for Android
+if (Platform.OS === 'android') {
+  if (UIManager.setLayoutAnimationEnabledExperimental) {
+    UIManager.setLayoutAnimationEnabledExperimental(true);
+  }
+}
 
 // Refined design tokens -- same accent hues, tuned for real depth. Still
 // pure View/StyleSheet, zero new dependencies.
@@ -41,6 +50,10 @@ const C = {
   shadow: "#000000",
 };
 
+// Haptic Feedback Helper
+const triggerHaptic = (ms: number = 15) => {
+  Vibration.vibrate(ms);
+};
 export default function App() {
   const [goals, setGoals] = useState<any[]>([]);
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
@@ -54,6 +67,8 @@ export default function App() {
   const [isSubscribing, setIsSubscribing] = useState(false);
   const [depositGoalId, setDepositGoalId] = useState<string | null>(null);
   const [depositAmount, setDepositAmount] = useState('');
+  const [fadeAnim] = useState(new Animated.Value(0)); // 0 = invisible
+  const [slideAnim] = useState(new Animated.Value(30)); // Starts 30px down
 
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
@@ -81,7 +96,32 @@ export default function App() {
   const savedStateRef = useRef<any>(null);
   const [session, setSession] = useState<Session | null>(null);
 
+  // Animation values for the meters
+  const meterAnimations = React.useRef([
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0),
+    new Animated.Value(0)
+  ]).current;
+
   // --- ALL HOOKS MUST BE HERE, AT THE TOP LEVEL ---
+
+  useEffect(() => {
+    const animations = [
+      { value: scores.discipline, anim: meterAnimations[0] },
+      { value: scores.impulse, anim: meterAnimations[1] },
+      { value: scores.volatility, anim: meterAnimations[2] },
+      { value: scores.savingsRate, anim: meterAnimations[3] },
+    ];
+
+    animations.forEach(({ value, anim }) => {
+      Animated.timing(anim, {
+        toValue: Math.max(0, Math.min(value, 100)),
+        duration: 1000, // 1 second smooth slide
+        useNativeDriver: false,
+      }).start();
+    });
+  }, [scores]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -557,8 +597,9 @@ export default function App() {
       const rawSmsList = await SmsModule.readBankSMS();
       const parsedTxns = backfillHistory(rawSmsList);
       parsedTxns.forEach((txn) => { txn.id = `${txn.date.getTime()}_${txn.amount}_${txn.merchant}_${txn.type}`; });
-      setTransactions(parsedTxns);
-      syncToCloud(parsedTxns);
+      // Trigger the animation BEFORE the transactions update!
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+      setTransactions(parsedTxns);      syncToCloud(parsedTxns);
 
       const debitTxns = parsedTxns.filter(t => t.type === 'debit');
       if (debitTxns.length === 0) return;
@@ -575,6 +616,11 @@ export default function App() {
       const monthlyCredit = parsedTxns.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
       const savingsRate = monthlyCredit > 0 ? Math.max(0, Math.min(100, ((monthlyCredit - monthlyDebit) / monthlyCredit) * 100)) : 0;
 
+      // Trigger a smooth animation for any UI changes!
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+      // Keep the animation here too!
+      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       const wellness = calculateWellnessScore(discipline, impulse, volatility);
       setScores({ discipline, impulse, volatility, wellness, savingsRate });
 
@@ -592,11 +638,31 @@ export default function App() {
         });
         model.train(pseudoLabels); setUserLabels(pseudoLabels); saveState({ userLabels: pseudoLabels });
       }
+
+      // TRIGGER THE FADE & SLIDE ANIMATION!
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        })
+      ]).start();
+
     } catch (e) { console.error("Failed to read SMS", e); }
   };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
+
+    // Reset animation to invisible
+    fadeAnim.setValue(0);
+    slideAnim.setValue(30);
+
     await fetchSMS(savedStateRef.current);
     setIsRefreshing(false);
   };
@@ -606,9 +672,15 @@ export default function App() {
     const newLabel: UserLabel = { txnFeatures: features, isImpulsive: isImpulsive ? 1 : 0 };
     const updatedLabels = [...userLabels, newLabel];
     const updatedLabeledIds = [...labeledTxnIds, txn.id!];
-    const updatedWorthIt = isImpulsive ? worthItTxnIds : [...worthItTxnIds, txn.id!];
+    const updatedWorthIt = isImpulsive ? worthItTxnIds.filter(id => id !== txn.id!) : [...worthItTxnIds, txn.id!];
 
-    setUserLabels(updatedLabels); setLabeledTxnIds(updatedLabeledIds); setWorthItTxnIds(updatedWorthIt);
+    // ADD THIS LINE to animate the card expanding and the meters updating!
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+
+    setUserLabels(updatedLabels);
+    setLabeledTxnIds(updatedLabeledIds);
+    setWorthItTxnIds(updatedWorthIt);
+    // ... rest of the function
     model.train(updatedLabels);
 
     const debitTxns = transactions.filter(t => t.type === 'debit');
@@ -679,6 +751,7 @@ export default function App() {
 
     setDepositGoalId(null);
     setDepositAmount('');
+    triggerHaptic(30); //Satisfying click!
   };
 
   const handleAddGoal = () => {
@@ -708,6 +781,7 @@ export default function App() {
     setNewGoalTarget('');
     setNewGoalCurrent('');
     setShowAddGoalModal(false);
+    triggerHaptic(30); //Satisfying Click
   };
 
   //TEMPORARILY BYPASS LOGIN TO TEST THE APP
@@ -779,7 +853,8 @@ return (
             />
           }
           ListHeaderComponent={() => (
-            <View>
+            <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
+              {/* Header */}
               <View style={styles.headerRow}>
                 <View>
                   <Text style={styles.greeting}>Welcome back</Text>
@@ -810,19 +885,27 @@ return (
                   <View style={{ flex: 1, justifyContent: 'center' }}>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline</Text><Text style={styles.meterValue}>{scores.discipline}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: getDynamicScoreColor(scores.discipline, 'higher_is_better') }]} /></View>
+                      <View style={styles.meterBackground}>
+                        <View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: getDynamicScoreColor(scores.discipline, 'higher_is_better') }]} />
+                      </View>
                     </View>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Impulse Index</Text><Text style={styles.meterValue}>{scores.impulse}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: getDynamicScoreColor(scores.impulse, 'lower_is_better') }]} /></View>
+                      <View style={styles.meterBackground}>
+                        <View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: getDynamicScoreColor(scores.impulse, 'lower_is_better') }]} />
+                      </View>
                     </View>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Volatility</Text><Text style={styles.meterValue}>{scores.volatility}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: getDynamicScoreColor(scores.volatility, 'lower_is_better') }]} /></View>
+                      <View style={styles.meterBackground}>
+                        <View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: getDynamicScoreColor(scores.volatility, 'lower_is_better') }]} />
+                      </View>
                     </View>
                     <View style={styles.meterContainer}>
                       <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Savings Rate</Text><Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text></View>
-                      <View style={styles.meterBackground}><View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: getDynamicScoreColor(scores.savingsRate, 'higher_is_better') }]} /></View>
+                      <View style={styles.meterBackground}>
+                        <View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: getDynamicScoreColor(scores.savingsRate, 'higher_is_better') }]} />
+                      </View>
                     </View>
                   </View>
                 </View>
@@ -1142,7 +1225,7 @@ return (
                   />
                 )}
               </View>
-            </View>
+            </Animated.View>
           )}
         />
       ) : activeTab === 'transactions' ? (
@@ -1151,6 +1234,7 @@ return (
           mode={mode}
           userLabels={userLabels}
           labeledTxnIds={labeledTxnIds}
+          worthItTxnIds={worthItTxnIds} // <-- ADD THIS LINE
           avgAmount={avgAmount}
           model={model}
           handleLabelTransaction={handleLabelTransaction}
@@ -1365,31 +1449,31 @@ return (
 
       {/* Tab Bar */}
       <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('dashboard')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('dashboard'); }}>
           {activeTab === 'dashboard' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'dashboard' && styles.tabIconActive]}>◉</Text>
           <Text style={[styles.tabLabel, activeTab === 'dashboard' && styles.tabLabelActive]}>Dashboard</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('transactions')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('transactions'); }}>
           {activeTab === 'transactions' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'transactions' && styles.tabIconActive]}>≣</Text>
           <Text style={[styles.tabLabel, activeTab === 'transactions' && styles.tabLabelActive]}>Transactions</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('budgets')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('budgets'); }}>
           {activeTab === 'budgets' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'budgets' && styles.tabIconActive]}>◍</Text>
           <Text style={[styles.tabLabel, activeTab === 'budgets' && styles.tabLabelActive]}>Budgets</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('coach')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('coach'); }}>
           {activeTab === 'coach' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'coach' && styles.tabIconActive]}>✦</Text>
           <Text style={[styles.tabLabel, activeTab === 'coach' && styles.tabLabelActive]}>AI Coach</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => setActiveTab('settings')}>
+        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('settings'); }}>
           {activeTab === 'settings' && <View style={styles.tabActivePill} />}
           <Text style={[styles.tabIcon, activeTab === 'settings' && styles.tabIconActive]}>☰</Text>
           <Text style={[styles.tabLabel, activeTab === 'settings' && styles.tabLabelActive]}>Settings</Text>
@@ -1444,7 +1528,14 @@ const styles = StyleSheet.create({
   iconBadge: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   iconBadgeGlyph: { fontSize: 15 },
 
-  ringWrap: { width: 108, height: 108, justifyContent: 'center', alignItems: 'center', marginRight: 20 },
+  ringWrap: {
+    width: 108, height: 108, justifyContent: 'center', alignItems: 'center', marginRight: 20,
+    shadowColor: '#38BDF8', // Neon Blue Glow
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 10,
+  },
 
   // Meters -- also reused for the Forecast risk bar and Goal progress
   // bars now, so every progress indicator in the app shares one visual
@@ -1700,4 +1791,14 @@ const styles = StyleSheet.create({
       fontSize: 11,
       fontWeight: '700',
     },
+  logo: { color: C.textPrimary, fontSize: 32, fontWeight: '700', marginBottom: 20, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
+  onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
+  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 23, fontFamily: Typography.fontFamilyRegular },
+  headerTitle: { color: C.textPrimary, fontSize: 25, fontWeight: '700', letterSpacing: -0.4, fontFamily: Typography.fontFamilyBold },
+  heroBalance: { color: C.textPrimary, fontSize: 42, fontWeight: '900', letterSpacing: -1, fontFamily: Typography.fontFamilyBold },
+  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.6, marginBottom: 16, fontFamily: Typography.fontFamilyBold },
+  leakMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '500', fontFamily: Typography.fontFamilyMedium },
+
+  meterBackground: { height: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
+  meterFill: { height: '100%', borderRadius: 999 },
 });

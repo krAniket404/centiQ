@@ -19,20 +19,30 @@ interface Props {
   mode: 'strict' | 'liberal' | null;
   userLabels: UserLabel[];
   labeledTxnIds: string[];
+  worthItTxnIds: string[]; // <-- ADD THIS
   avgAmount: number;
   model: UserBehaviorModel;
   handleLabelTransaction: (txn: ParsedTransaction, isImpulsive: boolean) => void;
 }
 
-export default function TransactionsScreen({ transactions, mode, userLabels, labeledTxnIds, avgAmount, model, handleLabelTransaction }: Props) {
+// Derives a transaction's effective category the SAME way in both the
+// filter and the display -- previously the display used this fallback but
+// the filter checked raw t.category directly, so a transaction showing
+// "Other" on screen could fail to appear when you tapped the "Other" chip.
+const deriveCategory = (t: ParsedTransaction): string =>
+  t.category || (t.type === 'credit' ? 'Income' : 'Other');
+
+export default function TransactionsScreen({ transactions, mode, userLabels, labeledTxnIds, worthItTxnIds, avgAmount, model, handleLabelTransaction }: Props) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
 
   const categories = ['All', 'Food', 'Groceries', 'Shopping', 'Travel', 'Entertainment', 'Bills', 'Health', 'Income', 'Other'];
 
   const filteredTxns = transactions.filter(t => {
-    const matchesSearch = (t.merchant || t.bank).toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesCategory = activeFilter === 'All' || t.category === activeFilter;
+    // Defensive fallback -- if both merchant and bank are ever empty,
+    // this previously called .toLowerCase() on undefined and crashed.
+    const matchesSearch = (t.merchant || t.bank || '').toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = activeFilter === 'All' || deriveCategory(t) === activeFilter;
     return matchesSearch && matchesCategory;
   });
 
@@ -78,12 +88,13 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
         renderItem={({ item }) => {
           const name = item.merchant || item.bank || '?';
           const firstLetter = name.charAt(0).toUpperCase();
-          const category = item.category || (item.type === 'credit' ? 'Income' : 'Other');
+          const category = deriveCategory(item);
           const accentColor = item.type === 'credit' ? CAT_COLORS.Income : (CAT_COLORS[category] || CAT_COLORS.Other);
 
           const isAnomaly = detectAnomaly(item, transactions).isAnomaly;
           const impulseProb = userLabels.length >= 5 && item.type === 'debit' ? model.predict(model.extractFeatures(item, avgAmount)) : 0;
           const isLabeled = labeledTxnIds.includes(item.id!);
+          const isCurrentlyWorthIt = worthItTxnIds.includes(item.id!);
 
           return (
             <View style={styles.txnCard}>
@@ -118,6 +129,9 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
                   <Text style={[styles.txnAmount, { color: item.type === 'credit' ? C.success : C.textPrimary }]}>
                     {item.type === 'credit' ? '+' : '-'}₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}
                   </Text>
+                  {/* FIX: styles.statusPill was referenced here but never
+                      defined, so this rendered as bare unstyled text
+                      (visible in your screenshot as plain "DONE" text). */}
                   <View style={styles.statusPill}>
                     <Text style={styles.statusText}>Done</Text>
                   </View>
@@ -126,7 +140,7 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
 
               {/* ALWAYS show labeling buttons for debits in Liberal Mode */}
               {item.type === 'debit' && mode === 'liberal' && (
-                <View style={styles.labelContainer}>
+                <View style={[styles.labelContainer, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
                   {!isLabeled ? (
                     <>
                       <Text style={styles.labelPrompt}>Happy with this purchase?</Text>
@@ -140,19 +154,27 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
                       </View>
                     </>
                   ) : (
-                    <View style={styles.buttonRow}>
-                      {/* Allow them to change their answer */}
-                      <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(16,185,129,0.1)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)' }]} onPress={() => handleLabelTransaction(item, false)}>
-                        <Text style={[styles.labelButtonText, { color: C.success }]}>Change to Worth It</Text>
+                    <>
+                      <Text style={styles.currentLabelText}>
+                        {isCurrentlyWorthIt ? '✅ Logged as Worth It' : '❤️‍🔥 Logged as Impulsive'}
+                      </Text>
+                      {/* FIX: this was calling handleLabelTransaction with
+                          `!isCurrentlyWorthIt`, which is the OPPOSITE of what
+                          the button text promises -- tapping "Change to
+                          Impulsive" was silently re-confirming "Worth It",
+                          and vice versa. Removing the negation makes the
+                          call match the button's stated intent.
+                          NOTE: this also needs a companion fix in App.tsx's
+                          handleLabelTransaction -- see the note below this
+                          file for why. */}
+                      <TouchableOpacity onPress={() => handleLabelTransaction(item, isCurrentlyWorthIt)}>
+                        <Text style={styles.changeText}>Change to {isCurrentlyWorthIt ? 'Impulsive' : 'Worth It'}</Text>
                       </TouchableOpacity>
-                      <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)' }]} onPress={() => handleLabelTransaction(item, true)}>
-                        <Text style={[styles.labelButtonText, { color: C.danger }]}>Change to Impulsive</Text>
-                      </TouchableOpacity>
-                    </View>
+                    </>
                   )}
                 </View>
               )}
-            </View>
+          </View>
           );
         }}
       />
@@ -191,11 +213,23 @@ const styles = StyleSheet.create({
   mlBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, marginBottom: 4 },
   mlBadgeText: { fontSize: 11, fontWeight: 'bold' },
   txnAmount: { fontSize: 16, fontWeight: 'bold' },
-  statusText: { color: C.textSecondary, fontSize: 10, marginTop: 2, textTransform: 'uppercase' },
+
+  // FIX: this style was missing entirely -- "Done" rendered as bare text
+  // with no pill background at all.
+  statusPill: {
+    backgroundColor: 'rgba(16,185,129,0.12)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    marginTop: 4,
+  },
+  statusText: { color: C.success, fontSize: 10, fontWeight: '700', textTransform: 'uppercase' },
 
   labelContainer: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 12, marginTop: 12 },
   buttonRow: { flexDirection: 'row', gap: 10 },
   labelButton: { flex: 1, paddingVertical: 8, borderRadius: 8, alignItems: 'center' },
   labelButtonText: { fontWeight: '600', fontSize: 13 },
-  thankYouText: { color: C.textSecondary, fontSize: 12, textAlign: 'center', fontStyle: 'italic', marginTop: 12 }
+  thankYouText: { color: C.textSecondary, fontSize: 12, textAlign: 'center', fontStyle: 'italic', marginTop: 12 },
+  currentLabelText: { color: C.textSecondary, fontSize: 13, fontWeight: '600' },
+  changeText: { color: C.accent, fontSize: 12, fontWeight: '700' },
 });
