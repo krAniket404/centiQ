@@ -452,6 +452,7 @@ export default function App() {
     return results;
   }, [transactions, activeStreaks]);
 
+  // Calculate Monthly Wrap Data (Fixed to exclude "Worth It" purchases)
   const monthlyWrapData = useMemo(() => {
     if (!Array.isArray(transactions) || transactions.length === 0 || !behavioralProfile) {
       return { totalSpend: 0, topCat: 'N/A', biggestImpulse: undefined, persona: { name: 'Loading...', desc: '', icon: '⏳', color: C.accent } };
@@ -459,14 +460,22 @@ export default function App() {
     const now = new Date();
     const debitTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear());
     const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+
     const catTotals: { [key: string]: number } = {};
     debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
     const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0] || 'N/A';
-    const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
-    const impulseTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4 || t.amount > avgAmt * 1.5);
+
+    // FIX: Only look for impulses in transactions that are NOT marked "Worth It"
+    const liberalTxns = debitTxns.filter(t => !worthItTxnIds.includes(t.id!));
+    const liberalTotalSpend = liberalTxns.reduce((a, b) => a + b.amount, 0);
+    const avgLiberalAmt = liberalTxns.length > 0 ? liberalTotalSpend / liberalTxns.length : 0;
+
+    // Find biggest impulse (late night or > 1.5x liberal average)
+    const impulseTxns = liberalTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4 || t.amount > avgLiberalAmt * 1.5);
     const biggestImpulse = impulseTxns.sort((a, b) => b.amount - a.amount)[0];
+
     return { totalSpend, topCat, biggestImpulse, persona: behavioralProfile.persona };
-  }, [transactions, behavioralProfile]);
+  }, [transactions, behavioralProfile, worthItTxnIds]); // Added worthItTxnIds to dependencies
 
   // --- FUNCTIONS START HERE ---
   const loadSavedData = async () => {
@@ -1520,55 +1529,58 @@ return (
         onRequestClose={() => setShowStreakModal(false)}
       >
         <View style={styles.briefingOverlay}>
-          <View style={[styles.briefingCard, { maxHeight: '80%' }]}>
+          <View style={[styles.briefingCard, { maxHeight: '85%', padding: 24 }]}>
             <Text style={styles.briefingTitle}>Your Habit Tracker</Text>
             <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 20, textAlign: 'center' }}>
               We unlock streaks based on your actual spending habits. Break the chain!
             </Text>
 
-            {[
-              { id: 'late_night', icon: '🌙', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
-              { id: 'weekend', icon: '🎉', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
-              { id: 'food_delivery', icon: '🛵', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
-              { id: 'online_shopping', icon: '📦', name: 'Online Shopping', desc: 'No Amazon/Flipkart/Myntra' },
-              { id: 'fast_food', icon: '🍔', name: 'Fast Food', desc: 'No McDonalds/KFC/Burger' },
-              { id: 'ride_hailing', icon: '🚗', name: 'Ride Hailing', desc: 'No Uber/Ola/Rapido' },
-              { id: 'coffee', icon: '☕', name: 'Coffee Shops', desc: 'No Starbucks/CCD/Cafe' }
-            ].map(habit => {
-              const isActive = activeStreaks.includes(habit.id);
-              const isUnlocked = unlockedStreaks.includes(habit.id);
+            {/* WRAPPED IN SCROLLVIEW SO YOU CAN SCROLL */}
+            <ScrollView style={{ width: '100%', maxHeight: 400 }} showsVerticalScrollIndicator={false}>
+              {[
+                { id: 'late_night', icon: '🌙', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
+                { id: 'weekend', icon: '🎉', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
+                { id: 'food_delivery', icon: '🛵', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
+                { id: 'online_shopping', icon: '📦', name: 'Online Shopping', desc: 'No Amazon/Flipkart/Myntra' },
+                { id: 'fast_food', icon: '🍔', name: 'Fast Food', desc: 'No McDonalds/KFC/Burger' },
+                { id: 'ride_hailing', icon: '🚗', name: 'Ride Hailing', desc: 'No Uber/Ola/Rapido' },
+                { id: 'coffee', icon: '☕', name: 'Coffee Shops', desc: 'No Starbucks/CCD/Cafe' }
+              ].map(habit => {
+                const isActive = activeStreaks.includes(habit.id);
+                const isUnlocked = unlockedStreaks.includes(habit.id);
 
-              return (
-                <TouchableOpacity
-                  key={habit.id}
-                  style={[
-                    styles.habitRow,
-                    isActive && isUnlocked && { borderColor: C.accent, backgroundColor: 'rgba(56,189,248,0.08)' },
-                    !isUnlocked && { opacity: 0.4 }
-                  ]}
-                  disabled={!isUnlocked}
-                  onPress={() => {
-                    if (isActive) {
-                      setActiveStreaks(activeStreaks.filter(id => id !== habit.id));
-                      saveState({ activeStreaks: activeStreaks.filter(id => id !== habit.id) });
-                    } else {
-                      setActiveStreaks([...activeStreaks, habit.id]);
-                      saveState({ activeStreaks: [...activeStreaks, habit.id] });
-                    }
-                  }}
-                >
-                  <Text style={{ fontSize: 24, marginRight: 14 }}>{habit.icon}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{habit.name}</Text>
-                    <Text style={{ color: C.textSecondary, fontSize: 12 }}>
-                      {isUnlocked ? habit.desc : '🔒 Locked - Not detected in your history'}
-                    </Text>
-                  </View>
-                  {isActive && isUnlocked && <Text style={{ color: C.accent, fontSize: 18, fontWeight: 'bold' }}>✓</Text>}
-                  {!isUnlocked && <Text style={{ color: C.textSecondary, fontSize: 18, fontWeight: 'bold' }}>🔒</Text>}
-                </TouchableOpacity>
-              );
-            })}
+                return (
+                  <TouchableOpacity
+                    key={habit.id}
+                    style={[
+                      styles.habitRow,
+                      isActive && isUnlocked && { borderColor: C.accent, backgroundColor: 'rgba(56,189,248,0.08)' },
+                      !isUnlocked && { opacity: 0.4 }
+                    ]}
+                    disabled={!isUnlocked}
+                    onPress={() => {
+                      if (isActive) {
+                        setActiveStreaks(activeStreaks.filter(id => id !== habit.id));
+                        saveState({ activeStreaks: activeStreaks.filter(id => id !== habit.id) });
+                      } else {
+                        setActiveStreaks([...activeStreaks, habit.id]);
+                        saveState({ activeStreaks: [...activeStreaks, habit.id] });
+                      }
+                    }}
+                  >
+                    <Text style={{ fontSize: 24, marginRight: 14 }}>{habit.icon}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{habit.name}</Text>
+                      <Text style={{ color: C.textSecondary, fontSize: 12 }}>
+                        {isUnlocked ? habit.desc : '🔒 Locked - Not detected in your history'}
+                      </Text>
+                    </View>
+                    {isActive && isUnlocked && <Text style={{ color: C.accent, fontSize: 18, fontWeight: 'bold' }}>✓</Text>}
+                    {!isUnlocked && <Text style={{ color: C.textSecondary, fontSize: 18, fontWeight: 'bold' }}>🔒</Text>}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
 
             <TouchableOpacity
               style={[styles.briefingButton, { marginTop: 24 }]}
@@ -1630,51 +1642,76 @@ return (
         onRequestClose={() => setShowMonthlyWrap(false)}
       >
         <View style={styles.briefingOverlay}>
-          <View style={[styles.briefingCard, { padding: 24 }]}>
-            <Text style={styles.briefingTitle}>My Monthly Wrap</Text>
-            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 20 }}>A snapshot of your spending behavior.</Text>
+          <View style={[styles.briefingCard, { padding: 28, width: '100%' }]}>
 
-            <View style={styles.wrapStatRow}>
-              <Text style={styles.wrapStatLabel}>WELLNESS SCORE</Text>
-              <Text style={[styles.wrapStatValue, { color: getDynamicScoreColor(scores.wellness, 'higher_is_better') }]}>{scores.wellness}/100</Text>
+            {/* Header */}
+            <View style={{ alignItems: 'center', marginBottom: 24 }}>
+              <Text style={{ fontSize: 40, marginBottom: 8 }}>📊</Text>
+              <Text style={[styles.briefingTitle, { marginBottom: 4 }]}>Monthly Wrap</Text>
+              <Text style={{ color: C.textSecondary, fontSize: 13, fontFamily: Typography.fontFamilyRegular }}>A snapshot of your spending behavior.</Text>
             </View>
-            <View style={styles.wrapStatRow}>
-              <Text style={styles.wrapStatLabel}>FINANCIAL PERSONA</Text>
-              <Text style={[styles.wrapStatValue, { color: C.accent }]}>{monthlyWrapData.persona.icon} {monthlyWrapData.persona.name}</Text>
+
+            {/* Wellness Score Hero */}
+            <View style={{ alignItems: 'center', marginBottom: 20, paddingVertical: 20, backgroundColor: 'rgba(56,189,248,0.05)', borderRadius: 20, width: '100%' }}>
+              <Text style={{ color: C.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8, fontFamily: Typography.fontFamilyBold }}>WELLNESS SCORE</Text>
+              <Text style={{ color: getDynamicScoreColor(scores.wellness, 'higher_is_better'), fontSize: 48, fontWeight: '900', fontFamily: Typography.fontFamilyBold }}>
+                {scores.wellness}<Text style={{ fontSize: 20, color: C.textSecondary }}> /100</Text>
+              </Text>
             </View>
-            <View style={styles.wrapStatRow}>
-              <Text style={styles.wrapStatLabel}>TOTAL SPENT</Text>
-              <Text style={styles.wrapStatValue}>₹{Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}</Text>
+
+            {/* Persona Badge */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${behavioralProfile.persona.color}10`, padding: 16, borderRadius: 16, marginBottom: 16, width: '100%' }}>
+              <Text style={{ fontSize: 24, marginRight: 14 }}>{behavioralProfile.persona.icon}</Text>
+              <View style={{ flex: 1 }}>
+                <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2, fontFamily: Typography.fontFamilyBold }}>FINANCIAL PERSONA</Text>
+                <Text style={{ color: behavioralProfile.persona.color, fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>{behavioralProfile.persona.name}</Text>
+              </View>
             </View>
-            <View style={styles.wrapStatRow}>
-              <Text style={styles.wrapStatLabel}>TOP CATEGORY</Text>
-              <Text style={styles.wrapStatValue}>{monthlyWrapData.topCat}</Text>
+
+            {/* Stats Grid */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 16 }}>
+              <View style={{ backgroundColor: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 16, flex: 1, marginRight: 8 }}>
+                <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6, fontFamily: Typography.fontFamilyBold }}>TOTAL SPENT</Text>
+                <Text style={{ color: C.textPrimary, fontSize: 18, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>₹{Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}</Text>
+              </View>
+              <View style={{ backgroundColor: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 16, flex: 1, marginLeft: 8 }}>
+                <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6, fontFamily: Typography.fontFamilyBold }}>TOP CATEGORY</Text>
+                <Text style={{ color: C.textPrimary, fontSize: 18, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>{monthlyWrapData.topCat}</Text>
+              </View>
             </View>
+
+            {/* Biggest Impulse Highlight */}
             {monthlyWrapData.biggestImpulse && (
-              <View style={styles.wrapStatRow}>
-                <Text style={styles.wrapStatLabel}>BIGGEST IMPULSE</Text>
-                <Text style={[styles.wrapStatValue, { color: C.danger, flex: 1, textAlign: 'right' }]} numberOfLines={1}>
-                  {monthlyWrapData.biggestImpulse.merchant} (₹{Math.round(monthlyWrapData.biggestImpulse.amount).toLocaleString('en-IN')})
-                </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.08)', padding: 16, borderRadius: 16, width: '100%', marginBottom: 24 }}>
+                <Text style={{ fontSize: 24, marginRight: 14 }}>🔥</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: C.danger, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2, fontFamily: Typography.fontFamilyBold }}>BIGGEST IMPULSE</Text>
+                  <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700', fontFamily: Typography.fontFamilyBold }} numberOfLines={1}>
+                    {monthlyWrapData.biggestImpulse.merchant}
+                  </Text>
+                  <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 2, fontFamily: Typography.fontFamilyRegular }}>₹{Math.round(monthlyWrapData.biggestImpulse.amount).toLocaleString('en-IN')}</Text>
+                </View>
               </View>
             )}
 
+            {/* Buttons */}
             <TouchableOpacity
-              style={[styles.briefingButton, { marginTop: 24 }]}
+              style={[styles.briefingButton, { marginBottom: 12 }]}
               onPress={async () => {
                 await Share.share({
                   message: `My CentiQ Monthly Wrap!\nWellness: ${scores.wellness}/100\nPersona: ${monthlyWrapData.persona.name}\nTotal Spent: ₹${Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}\nTop Category: ${monthlyWrapData.topCat}\n\nDecode your spending behavior with CentiQ.`
                 });
               }}
             >
-              <Text style={styles.briefingButtonText}>Share to Instagram/WhatsApp</Text>
+              <Text style={styles.briefingButtonText}>Share to Instagram / WhatsApp</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.briefingButton, { backgroundColor: 'rgba(255,255,255,0.1)', marginTop: 10 }]}
+              style={{ padding: 10, alignItems: 'center' }}
               onPress={() => setShowMonthlyWrap(false)}
             >
-              <Text style={[styles.briefingButtonText, { color: C.textPrimary }]}>Close</Text>
+              <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '600', fontFamily: Typography.fontFamilyMedium }}>Close</Text>
             </TouchableOpacity>
+
           </View>
         </View>
       </Modal>
@@ -1844,7 +1881,7 @@ const styles = StyleSheet.create({
 
   // AI Morning Briefing Modal
   briefingOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 24,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.96)', justifyContent: 'center', alignItems: 'center', padding: 24,
   },
   briefingCard: {
     width: '100%', backgroundColor: C.glassStrong, borderWidth: 1,

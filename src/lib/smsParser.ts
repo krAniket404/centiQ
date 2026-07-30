@@ -17,8 +17,12 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
 
   const upperBody = smsBody.toUpperCase();
 
-  // 1. SPAM FILTER: Reject promotional messages immediately
-  const spamKeywords = ['OFFER', 'CASHBACK', 'WIN', 'COUPON', 'DISCOUNT', 'DEAL', 'APPLY', 'PROMO', 'CLICK HERE', 'SHOP NOW', 'SUBSCRIBE', 'DATA PACK', 'RECHARGE', 'TOLL FREE'];
+  // 1. SPAM FILTER: Reject promotional messages and internal wallet credits
+  const spamKeywords = [
+    'OFFER', 'CASHBACK', 'WIN', 'COUPON', 'DISCOUNT', 'DEAL', 'APPLY', 'PROMO',
+    'CLICK HERE', 'SHOP NOW', 'SUBSCRIBE', 'DATA PACK', 'RECHARGE', 'TOLL FREE',
+    'WALLET', 'CASH CREDITED', 'REWARD', 'POINTS CREDITED', 'GIFT CARD', 'STORE CREDIT'
+  ];
   if (spamKeywords.some(kw => upperBody.includes(kw))) return null;
 
   // 2. Determine Transaction Type
