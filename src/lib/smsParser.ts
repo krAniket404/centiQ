@@ -11,37 +11,45 @@ export interface ParsedTransaction {
 
 export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransaction | null {
   let amount = 0;
-  let bank = 'Bank'; // Changed from 'Transaction'
+  let bank = 'Transaction';
   let type: 'debit' | 'credit' | null = null;
   let merchant = '';
 
   const upperBody = smsBody.toUpperCase();
 
-  // 1. Transaction Type
+  // 1. SPAM FILTER: Reject promotional messages immediately
+  const spamKeywords = ['OFFER', 'CASHBACK', 'WIN', 'COUPON', 'DISCOUNT', 'DEAL', 'APPLY', 'PROMO', 'CLICK HERE', 'SHOP NOW', 'SUBSCRIBE', 'DATA PACK', 'RECHARGE', 'TOLL FREE'];
+  if (spamKeywords.some(kw => upperBody.includes(kw))) return null;
+
+  // 2. Determine Transaction Type
   const creditKeywords = ['CREDITED', 'RECEIVED', 'REFUND', 'ADDED', 'DEPOSITED', 'REVERSAL'];
   const debitKeywords = ['DEBITED', 'SPENT', 'PAID', 'PURCHASE', 'WITHDRAWN', 'SENT', 'DEDUCTED'];
+
   if (creditKeywords.some(kw => upperBody.includes(kw))) type = 'credit';
   else if (debitKeywords.some(kw => upperBody.includes(kw))) type = 'debit';
-  else return null;
+  else return null; // If it doesn't have a clear transaction keyword, ignore it
 
-  // 2. Extract Amount
+  // 3. Extract Amount (Strict: Must find Rs/INR/₹ followed by numbers)
   const amountRegex = /(?:Rs\.?|INR|₹)\s?([\d,]+\.?\d*)/i;
   const match = smsBody.match(amountRegex);
   if (match && match[1]) {
     amount = parseFloat(match[1].replace(/,/g, ''));
-  } else return null;
+    if (amount <= 0) return null; // Ignore 0 Rs transactions
+  } else {
+    return null; // Not a real transaction if no valid amount is found
+  }
 
-  // 3. Extract Merchant / Sender based on Type
+  // 4. Extract Merchant / Sender based on Type
   if (type === 'credit') {
     const vpaRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
     const vpaMatch = smsBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       merchant = vpaMatch[1].trim().toUpperCase();
     } else {
-      const fromRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]{3,40})/i; // Expanded to 40 chars
+      const fromRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]{3,40})/i;
       const fromMatch = smsBody.match(fromRegex);
       if (fromMatch && fromMatch[1]) {
-        merchant = fromMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase(); // Capture up to 3 words
+        merchant = fromMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
       }
     }
   } else {
@@ -50,23 +58,19 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
     if (vpaMatch && vpaMatch[1]) {
       merchant = vpaMatch[1].trim().toUpperCase();
     } else {
-      const toRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]{3,40})/i; // Expanded to 40 chars
+      const toRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]{3,40})/i;
       const toMatch = smsBody.match(toRegex);
       if (toMatch && toMatch[1]) {
-        merchant = toMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase(); // Capture up to 3 words
+        merchant = toMatch[1].trim().split(' ').slice(0, 3).join(' ').toUpperCase();
       }
     }
   }
 
   // Clean up common garbage words
   merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL)\b/g, '').trim();
+  if (merchant.length < 3) merchant = '';
 
-  // Fallback if no name found
-  if (merchant.length < 3) {
-    merchant = type === 'credit' ? 'Income' : 'Merchant';
-  }
-
-  // 4. Identify Bank
+  // 5. Identify Bank
   if (upperBody.includes('HDFC')) bank = 'HDFC';
   else if (upperBody.includes('SBI')) bank = 'SBI';
   else if (upperBody.includes('ICICI')) bank = 'ICICI';

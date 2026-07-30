@@ -31,17 +31,16 @@ if (Platform.OS === 'android') {
   }
 }
 
-// Refined design tokens -- same accent hues, tuned for real depth. Still
-// pure View/StyleSheet, zero new dependencies.
+// Refined Luxury Design Tokens
 const C = {
-  bg: "#080808",
-  glass: "rgba(255,255,255,0.05)",
-  glassStrong: "rgba(255,255,255,0.08)",
-  glassHighlight: "rgba(255,255,255,0.22)", // borderTopColor only -- the "light on glass edge" trick
-  border: "rgba(255,255,255,0.10)",
-  borderStrong: "rgba(255,255,255,0.14)",
+  bg: "#060608",               // Deeper, richer black
+  glass: "rgba(255,255,255,0.04)", // Slightly darker glass for contrast
+  glassStrong: "rgba(255,255,255,0.07)",
+  glassHighlight: "rgba(255,255,255,0.2)", // Brighter top edge for the "glass" trick
+  border: "rgba(255,255,255,0.08)",
+  borderStrong: "rgba(255,255,255,0.12)",
   textPrimary: "#FFFFFF",
-  textSecondary: "#9A9AA0",
+  textSecondary: "#A0A0B0",    // Slightly brighter for better readability
   accent: "#38BDF8",
   success: "#10B981",
   warning: "#F59E0B",
@@ -69,6 +68,13 @@ export default function App() {
   const [depositAmount, setDepositAmount] = useState('');
   const [fadeAnim] = useState(new Animated.Value(0)); // 0 = invisible
   const [slideAnim] = useState(new Animated.Value(30)); // Starts 30px down
+  const [pendingPurchases, setPendingPurchases] = useState<any[]>([]);
+  const [showPauseModal, setShowPauseModal] = useState(false);
+  const [pauseName, setPauseName] = useState('');
+  const [pauseAmount, setPauseAmount] = useState('');
+  const [activeStreaks, setActiveStreaks] = useState<string[]>(['late_night']);
+  const [showStreakModal, setShowStreakModal] = useState(false);
+  const [activeWeekIndex, setActiveWeekIndex] = useState(0);
 
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
@@ -241,7 +247,6 @@ export default function App() {
         console.warn("Failed to check pending notif", e);
       }
     };
-
     // Run when app opens
     checkPendingNotif();
 
@@ -257,18 +262,18 @@ export default function App() {
     };
   }, [transactions]);
 
+  // --- ALL BULLETPROOF USEMEMO HOOKS ---
+
   const avgAmount = useMemo(() => {
-    if (transactions.length === 0) return 0;
+    if (!Array.isArray(transactions) || transactions.length === 0) return 0;
     return transactions.reduce((sum, t) => sum + t.amount, 0) / transactions.length;
   }, [transactions]);
 
-  // Group transactions into Weeks of the current Month
   const monthlyWeeklyData = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return [];
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
-
-    // Initialize 5 weeks (max in a month), each with Mon-Sun structure
     const weeks = Array.from({ length: 5 }, (_, i) => ({
       weekNum: i + 1,
       data: [
@@ -276,172 +281,58 @@ export default function App() {
         { day: 'Thu', amount: 0 }, { day: 'Fri', amount: 0 }, { day: 'Sat', amount: 0 }, { day: 'Sun', amount: 0 }
       ]
     }));
-
     transactions.forEach(t => {
       if (t.type === 'debit' && t.date.getMonth() === currentMonth && t.date.getFullYear() === currentYear) {
         const dayOfMonth = t.date.getDate();
-        const weekIndex = Math.floor((dayOfMonth - 1) / 7); // 0 to 4
+        const weekIndex = Math.floor((dayOfMonth - 1) / 7);
         if (weekIndex < 5) {
-          const dayOfWeek = t.date.getDay(); // 0=Sun, 1=Mon...
-          const mapIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1; // Map to 0=Mon, 6=Sun
+          const dayOfWeek = t.date.getDay();
+          const mapIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
           weeks[weekIndex].data[mapIndex].amount += t.amount;
         }
       }
     });
-
-    // Determine which weeks actually have data or are the current week
     const currentWeekIndex = Math.floor((now.getDate() - 1) / 7);
     return weeks.filter((w, i) => w.data.some(d => d.amount > 0) || i === currentWeekIndex);
   }, [transactions]);
 
-  // Find the highest spend day across the whole month for a consistent Y-axis scale
   const globalMaxSpend = useMemo(() => {
     let max = 0;
-    monthlyWeeklyData.forEach(week => {
-      week.data.forEach(day => {
-        if (day.amount > max) max = day.amount;
+    if (Array.isArray(monthlyWeeklyData)) {
+      monthlyWeeklyData.forEach(week => {
+        week.data.forEach(day => {
+          if (day.amount > max) max = day.amount;
+        });
       });
-    });
+    }
     return max > 0 ? max : 1;
   }, [monthlyWeeklyData]);
-  // State to track which week is selected
-  const [activeWeekIndex, setActiveWeekIndex] = useState(0);
-
-  // Calculate Monthly Forecast & Overspend Risk
-  const monthlyForecast = useMemo(() => {
-    const now = new Date();
-    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-    const dayOfMonth = now.getDate();
-
-    const monthTxns = transactions.filter(t =>
-      t.type === 'debit' &&
-      t.date.getMonth() === now.getMonth() &&
-      t.date.getFullYear() === now.getFullYear()
-    );
-
-    const spentSoFar = monthTxns.reduce((a, b) => a + b.amount, 0);
-    const monthlyIncome = transactions.filter(t =>
-      t.type === 'credit' &&
-      t.date.getMonth() === now.getMonth() &&
-      t.date.getFullYear() === now.getFullYear()
-    ).reduce((a, b) => a + b.amount, 0);
-
-    // Calculate average daily spend so far
-    const avgDailySpend = dayOfMonth > 0 ? spentSoFar / dayOfMonth : 0;
-
-    // Project that to the end of the month
-    const projectedSpend = avgDailySpend * daysInMonth;
-
-    // Calculate Risk Percentage (How much of your income will be consumed?)
-    // If projected spend > income, risk is 100%+
-    const riskRatio = monthlyIncome > 0 ? (projectedSpend / monthlyIncome) : 0;
-    const overspendRisk = Math.max(0, Math.min(100, Math.round(riskRatio * 100)));
-
-    // Determine risk level for UI color
-    let riskLevel = 'Low';
-    let riskColor = C.success;
-    if (overspendRisk > 85) { riskLevel = 'High'; riskColor = C.danger; }
-    else if (overspendRisk > 65) { riskLevel = 'Moderate'; riskColor = C.warning; }
-
-    return {
-      projectedSpend: Math.round(projectedSpend),
-      overspendRisk,
-      riskLevel,
-      riskColor
-    };
-  }, [transactions]);
 
   const recurringCharges = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return { knownSubscriptions: [], repetitivePayments: [], totalSubsCost: 0, totalRepetitiveCost: 0 };
     const result = detectSubscriptionLeaks(transactions) || { knownSubscriptions: [], repetitivePayments: [] };
     const knownSubs = result.knownSubscriptions || [];
     const repetitivePays = result.repetitivePayments || [];
-
     const totalSubsCost = knownSubs.reduce((sum: number, l: any) => sum + l.amount, 0);
     const totalRepetitiveCost = repetitivePays.reduce((sum: number, l: any) => sum + l.amount, 0);
-
     return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays, totalSubsCost, totalRepetitiveCost };
   }, [transactions]);
 
-  // Generate Real-Time Behavioral Insights
-  const behaviorFeed = useMemo(() => {
-    const insights: { icon: string; title: string; text: string; color: string }[] = [];
-    const debitTxns = transactions.filter(t => t.type === 'debit');
-
-    // 1. Weekend Spending Insight
-    const weekendTxns = debitTxns.filter(t => t.date.getDay() === 0 || t.date.getDay() === 6);
-    const weekendSpend = weekendTxns.reduce((a, b) => a + b.amount, 0);
-    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
-    if (totalSpend > 0 && weekendSpend / totalSpend > 0.4) {
-      insights.push({
-        icon: 'calendar',
-        title: 'WEEKEND WARRIOR',
-        text: `You spend ${Math.round((weekendSpend / totalSpend) * 100)}% of your money on weekends. Watch out for impulse food delivery!`,
-        color: C.warning
-      });
-    }
-
-    // 2. Late Night Cravings Insight
-    const lateNightTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4);
-    if (lateNightTxns.length > 2) {
-      insights.push({
-        icon: 'moon',
-        title: 'LATE NIGHT CRAVINGS',
-        text: `We detected ${lateNightTxns.length} transactions between 10 PM and 4 AM. These are highly likely to be impulsive.`,
-        color: C.purple
-      });
-    }
-
-    // 3. Top Category Insight
-    const catTotals: { [key: string]: number } = {};
-    debitTxns.forEach(t => {
-      const cat = t.category || 'Other';
-      catTotals[cat] = (catTotals[cat] || 0) + t.amount;
-    });
-    const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
-    if (topCat && catTotals[topCat] > 0) {
-      insights.push({
-        icon: 'tag',
-        title: 'TOP CATEGORY',
-        text: `${topCat} is your highest spending category at ₹${Math.round(catTotals[topCat]).toLocaleString('en-IN')}. Consider setting a budget for this.`,
-        color: C.accent
-      });
-    }
-
-    // 4. High Value Transaction Insight
-    const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
-    const highValueTxns = debitTxns.filter(t => t.amount > avgAmt * 3);
-    if (highValueTxns.length > 0) {
-      insights.push({
-        icon: 'alert',
-        title: 'UNUSUAL SPENDING',
-        text: `You made ${highValueTxns.length} transactions significantly larger than your average of ₹${Math.round(avgAmt)}.`,
-        color: C.danger
-      });
-    }
-
-    return insights;
-  }, [transactions]);
-
-  // Financial Persona & 30-Day Heatmap Engine
   const behavioralProfile = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) {
+      return { persona: { name: 'The Balanced Spender', desc: 'You have a healthy mix of discipline and spontaneity.', icon: '⚖️', color: C.accent }, heatmap: [] };
+    }
     const debitTxns = transactions.filter(t => t.type === 'debit');
-
-    // Calculate Top Category for "Foodie" persona
     const catTotals: { [key: string]: number } = {};
     debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
     const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
 
-    // 1. Determine Persona based on ML scores and data
     let persona = { name: 'The Balanced Spender', desc: 'You have a healthy mix of discipline and spontaneity.', icon: '⚖️', color: C.accent };
-
-    // High Priority Extremes
     if (scores.impulse > 60 && scores.volatility > 60) {
       persona = { name: 'The Midnight Impulser', desc: 'High volatility and late-night triggers. You act fast and feel it later.', icon: '⚡', color: C.danger };
     } else if (scores.discipline > 70 && scores.savingsRate > 50) {
       persona = { name: 'The Stealth Saver', desc: 'Highly disciplined. You crush your savings goals without thinking twice.', icon: '🛡️', color: C.success };
-    }
-    // New Specialized Personas
-    else if (recurringCharges.knownSubscriptions.length >= 4) {
+    } else if (recurringCharges.knownSubscriptions.length >= 4) {
       persona = { name: 'The Subscription Hoarder', desc: 'You have 4+ active recurring subscriptions. Time to audit and cancel the unused ones!', icon: '📦', color: C.purple };
     } else if (topCat === 'Food' && scores.impulse > 50) {
       persona = { name: 'The Foodie Impulser', desc: 'Food is your top category, and your impulse score is high. Those late-night deliveries add up!', icon: '🍔', color: C.warning };
@@ -449,44 +340,131 @@ export default function App() {
       persona = { name: 'The Weekend Warrior', desc: 'You stay disciplined during the week, but cut loose on the weekends.', icon: '🎉', color: C.warning };
     }
 
-    // 2. Generate 30-Day Heatmap Data
     const days: { date: Date; amount: number; isImpulsive: boolean }[] = [];
     const today = new Date();
-
     for (let i = 29; i >= 0; i--) {
       const date = new Date(today);
       date.setDate(today.getDate() - i);
       date.setHours(0, 0, 0, 0);
-
-      const dayTxns = transactions.filter(t => {
-        const tDate = new Date(t.date);
-        return tDate.toDateString() === date.toDateString() && t.type === 'debit';
-      });
-
+      const dayTxns = transactions.filter(t => new Date(t.date).toDateString() === date.toDateString() && t.type === 'debit');
       const amount = dayTxns.reduce((a, b) => a + b.amount, 0);
       const isImpulsive = dayTxns.some(t => t.date.getHours() >= 22 || t.date.getHours() <= 4 || t.amount > avgAmount * 1.5);
-
       days.push({ date, amount, isImpulsive });
     }
-
     return { persona, heatmap: days };
-  }, [scores, transactions, avgAmount, recurringCharges]); // Added recurringCharges to dependencies
+  }, [scores, transactions, avgAmount, recurringCharges]);
 
-  // Calculate Monthly Wrap Data
+  const monthlyForecast = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return { projectedSpend: 0, overspendRisk: 0, riskLevel: 'Low', riskColor: C.success };
+    const now = new Date();
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const monthTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear());
+    const spentSoFar = monthTxns.reduce((a, b) => a + b.amount, 0);
+    const monthlyIncome = transactions.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
+    const avgDailySpend = dayOfMonth > 0 ? spentSoFar / dayOfMonth : 0;
+    const projectedSpend = avgDailySpend * daysInMonth;
+    const riskRatio = monthlyIncome > 0 ? (projectedSpend / monthlyIncome) : 0;
+    const overspendRisk = Math.max(0, Math.min(100, Math.round(riskRatio * 100)));
+    let riskLevel = 'Low';
+    let riskColor = C.success;
+    if (overspendRisk > 85) { riskLevel = 'High'; riskColor = C.danger; }
+    else if (overspendRisk > 65) { riskLevel = 'Moderate'; riskColor = C.warning; }
+    return { projectedSpend: Math.round(projectedSpend), overspendRisk, riskLevel, riskColor };
+  }, [transactions]);
+
+  const behaviorFeed = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return [];
+    const insights: { icon: string; title: string; text: string; color: string }[] = [];
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    const weekendTxns = debitTxns.filter(t => t.date.getDay() === 0 || t.date.getDay() === 6);
+    const weekendSpend = weekendTxns.reduce((a, b) => a + b.amount, 0);
+    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+    if (totalSpend > 0 && weekendSpend / totalSpend > 0.4) {
+      insights.push({ icon: '📅', title: 'WEEKEND WARRIOR', text: `You spend ${Math.round((weekendSpend / totalSpend) * 100)}% of your money on weekends. Watch out for impulse food delivery!`, color: C.warning });
+    }
+    const lateNightTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4);
+    if (lateNightTxns.length > 2) {
+      insights.push({ icon: '🌙', title: 'LATE NIGHT CRAVINGS', text: `We detected ${lateNightTxns.length} transactions between 10 PM and 4 AM. These are highly likely to be impulsive.`, color: C.purple });
+    }
+    const catTotals: { [key: string]: number } = {};
+    debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
+    const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
+    if (topCat && catTotals[topCat] > 0) {
+      insights.push({ icon: '🏷️', title: 'TOP CATEGORY', text: `${topCat} is your highest spending category at ₹${Math.round(catTotals[topCat]).toLocaleString('en-IN')}. Consider setting a budget for this.`, color: C.accent });
+    }
+    const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
+    const highValueTxns = debitTxns.filter(t => t.amount > avgAmt * 3);
+    if (highValueTxns.length > 0) {
+      insights.push({ icon: '⚠️', title: 'UNUSUAL SPENDING', text: `You made ${highValueTxns.length} transactions significantly larger than your average of ₹${Math.round(avgAmt)}.`, color: C.danger });
+    }
+    return insights;
+  }, [transactions]);
+
+  const unlockedStreaks = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return ['late_night', 'weekend'];
+    const unlocked = ['late_night', 'weekend'];
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    const hasMerchant = (keywords: string[]) => {
+      return debitTxns.some(t => {
+        const m = (t.merchant || '').toUpperCase();
+        return keywords.some(k => m.includes(k));
+      });
+    };
+    if (hasMerchant(['SWIGGY', 'ZOMATO', 'DOMINOS', 'EATS', 'PIZZA'])) unlocked.push('food_delivery');
+    if (hasMerchant(['AMAZON', 'FLIPKART', 'MYNTRA', 'AJIO', 'NYKAA'])) unlocked.push('online_shopping');
+    if (hasMerchant(['MCDONALD', 'KFC', 'BURGER', 'SUBWAY', 'WENDYS'])) unlocked.push('fast_food');
+    if (hasMerchant(['UBER', 'OLA', 'RAPIDO', 'LYFT'])) unlocked.push('ride_hailing');
+    if (hasMerchant(['STARBUCKS', 'CCD', 'CAFE', 'COFFEE', 'COSTA'])) unlocked.push('coffee');
+    return Array.from(new Set(unlocked));
+  }, [transactions]);
+
+  const streakData = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return {};
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    if (debitTxns.length === 0) return {};
+    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+    const avgAmt = totalSpend / debitTxns.length;
+    const results: { [key: string]: number } = {};
+    (activeStreaks || ['late_night']).forEach(streakId => {
+      let streak = 0;
+      let checkDate = new Date();
+      checkDate.setHours(0, 0, 0, 0);
+      checkDate.setDate(checkDate.getDate() - 1);
+      while (true) {
+        const dateStr = checkDate.toDateString();
+        const dayTxns = debitTxns.filter(t => new Date(t.date).toDateString() === dateStr);
+        let broken = false;
+        if (dayTxns.length > 0) {
+          if (streakId === 'late_night') broken = dayTxns.some(t => { const h = new Date(t.date).getHours(); return h >= 22 || h <= 6; });
+          else if (streakId === 'weekend') { const day = checkDate.getDay(); if (day === 0 || day === 6) broken = dayTxns.some(t => t.amount > avgAmt * 1.5); }
+          else if (streakId === 'food_delivery') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('EATS') || m.includes('PIZZA'); });
+          else if (streakId === 'online_shopping') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('AMAZON') || m.includes('FLIPKART') || m.includes('MYNTRA') || m.includes('AJIO') || m.includes('NYKAA'); });
+          else if (streakId === 'fast_food') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('MCDONALD') || m.includes('KFC') || m.includes('BURGER') || m.includes('SUBWAY') || m.includes('WENDYS'); });
+          else if (streakId === 'ride_hailing') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('UBER') || m.includes('OLA') || m.includes('RAPIDO') || m.includes('LYFT'); });
+          else if (streakId === 'coffee') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('STARBUCKS') || m.includes('CCD') || m.includes('CAFE') || m.includes('COFFEE') || m.includes('COSTA'); });
+        }
+        if (broken) break;
+        else { streak++; checkDate.setDate(checkDate.getDate() - 1); if (streak > 365) break; }
+      }
+      results[streakId] = streak;
+    });
+    return results;
+  }, [transactions, activeStreaks]);
+
   const monthlyWrapData = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0 || !behavioralProfile) {
+      return { totalSpend: 0, topCat: 'N/A', biggestImpulse: undefined, persona: { name: 'Loading...', desc: '', icon: '⏳', color: C.accent } };
+    }
     const now = new Date();
     const debitTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear());
     const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
-
     const catTotals: { [key: string]: number } = {};
     debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
     const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0] || 'N/A';
-
-    // Find biggest impulse (highest amount late at night or > 1.5x avg)
     const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
     const impulseTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4 || t.amount > avgAmt * 1.5);
     const biggestImpulse = impulseTxns.sort((a, b) => b.amount - a.amount)[0];
-
     return { totalSpend, topCat, biggestImpulse, persona: behavioralProfile.persona };
   }, [transactions, behavioralProfile]);
 
@@ -500,7 +478,19 @@ export default function App() {
       if (parsed.userLabels) setUserLabels(parsed.userLabels);
       if (parsed.labeledTxnIds) setLabeledTxnIds(parsed.labeledTxnIds);
       if (parsed.worthItTxnIds) setWorthItTxnIds(parsed.worthItTxnIds);
-      if (parsed.goals) setGoals(parsed.goals); // <-- ADD THIS
+      if (parsed.goals) setGoals(parsed.goals);
+      if (parsed.activeStreaks) setActiveStreaks(parsed.activeStreaks);
+
+      // FIX: Convert date strings back into actual Date objects!
+      if (Array.isArray(parsed.transactions)) {
+        const hydratedTxns = parsed.transactions.map((t: any) => ({
+          ...t,
+          date: new Date(t.date)
+        }));
+        setTransactions(hydratedTxns);
+      }
+
+      if (parsed.scores) setScores(parsed.scores);
       return parsed;
     } catch (e) { return null; }
   };
@@ -511,7 +501,10 @@ export default function App() {
       userLabels: overrides.userLabels ?? userLabels,
       labeledTxnIds: overrides.labeledTxnIds ?? labeledTxnIds,
       worthItTxnIds: overrides.worthItTxnIds ?? worthItTxnIds,
-      goals: overrides.goals ?? goals, // <-- ADD THIS
+      goals: overrides.goals ?? goals,
+      transactions: overrides.transactions ?? transactions,
+      scores: overrides.scores ?? scores,
+      activeStreaks: overrides.activeStreaks ?? activeStreaks, // <-- ADD THIS
     };
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
@@ -754,6 +747,43 @@ export default function App() {
     triggerHaptic(30); //Satisfying click!
   };
 
+  // Load pending purchases on mount
+  useEffect(() => {
+    const loadPending = async () => {
+      const raw = await SmsModule.loadData('pending_purchases');
+      if (raw) setPendingPurchases(JSON.parse(raw));
+    };
+    loadPending();
+  }, []);
+
+  const addPendingPurchase = async () => {
+    if (!pauseName) return;
+    const newPurchase = {
+      id: Date.now().toString(),
+      name: pauseName,
+      amount: parseFloat(pauseAmount) || 0,
+      unlockTime: Date.now() + (24 * 60 * 60 * 1000) // 24 hours from now
+    };
+    const updated = [newPurchase, ...pendingPurchases];
+    setPendingPurchases(updated);
+    await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
+    setPauseName('');
+    setPauseAmount('');
+    setShowPauseModal(false);
+  };
+
+  const resolvePurchase = async (id: string, bought: boolean) => {
+    const purchase = pendingPurchases.find(p => p.id === id);
+    if (bought) {
+      Alert.alert("Enjoy it! 🛍️", `You waited 24 hours. Go ahead and buy ${purchase?.name}.`);
+    } else {
+      Alert.alert("Huge win! 🎉", `You resisted the impulse and saved ₹${purchase?.amount}. Your brain is adapting!`);
+    }
+    const updated = pendingPurchases.filter(p => p.id !== id);
+    setPendingPurchases(updated);
+    await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
+  };
+
   const handleAddGoal = () => {
     if (!newGoalName || !newGoalTarget) {
       Alert.alert("Error", "Please enter a goal name and target amount.");
@@ -928,6 +958,89 @@ return (
                   <Text style={[styles.personaName, { color: behavioralProfile.persona.color }]}>{behavioralProfile.persona.name}</Text>
                   <Text style={styles.personaDesc}>{behavioralProfile.persona.desc}</Text>
                 </View>
+              </View>
+
+              {/* Dynamic Discipline Streaks Card */}
+              <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <Text style={styles.cardHeaderTitle}>DISCIPLINE STREAKS 🔥</Text>
+                  <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowStreakModal(true)}>
+                    <Text style={styles.wrapButtonText}>Manage</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {activeStreaks.length === 0 ? (
+                  <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
+                    No habits selected. Tap "Manage" to choose which bad habits you want to break!
+                  </Text>
+                ) : (
+                  activeStreaks.map(id => {
+                    const config = {
+                      late_night: { icon: '🌙', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
+                      weekend: { icon: '🎉', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
+                      food_delivery: { icon: '🛵', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
+                      online_shopping: { icon: '📦', name: 'Online Shopping', desc: 'No Amazon/Flipkart' }
+                    }[id];
+
+                    if (!config) return null;
+
+                    return (
+                      <View key={id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                        <Text style={{ fontSize: 24, marginRight: 14 }}>{config.icon}</Text>
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700' }}>{streakData[id] || 0} Days</Text>
+                          <Text style={{ color: C.textSecondary, fontSize: 12 }}>{config.name}</Text>
+                        </View>
+                        <Text style={{ color: C.textSecondary, fontSize: 11, textAlign: 'right', flex: 0.5 }}>{config.desc}</Text>
+                      </View>
+                    );
+                  })
+                )}
+              </View>
+
+              {/* The 24-Hour Rule Card */}
+              <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+                  <Text style={styles.cardHeaderTitle}>THE 24-HOUR RULE ⏳</Text>
+                  <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowPauseModal(true)}>
+                    <Text style={styles.wrapButtonText}>+ Add</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {pendingPurchases.length === 0 ? (
+                  <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
+                    Want to buy something? Add it here instead of buying it instantly. If you still want it in 24 hours, go for it!
+                  </Text>
+                ) : (
+                  pendingPurchases.map(p => {
+                    const timeLeft = p.unlockTime - Date.now();
+                    const isUnlocked = timeLeft <= 0;
+                    const hoursLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60)));
+
+                    return (
+                      <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                        <View style={{ flex: 1, marginRight: 12 }}>
+                          <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{p.name}</Text>
+                          <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 2 }}>
+                            {isUnlocked ? 'Timer up! Did you buy it?' : `${hoursLeft}h left to decide`}
+                          </Text>
+                        </View>
+                        {isUnlocked ? (
+                          <View style={{ flexDirection: 'row', gap: 8 }}>
+                            <TouchableOpacity onPress={() => resolvePurchase(p.id, true)} style={{ backgroundColor: 'rgba(16,185,129,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                              <Text style={{ color: C.success, fontSize: 11, fontWeight: '700' }}>Bought</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity onPress={() => resolvePurchase(p.id, false)} style={{ backgroundColor: 'rgba(239,68,68,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                              <Text style={{ color: C.danger, fontSize: 11, fontWeight: '700' }}>Resisted</Text>
+                            </TouchableOpacity>
+                          </View>
+                        ) : (
+                          <Text style={{ color: C.accent, fontSize: 22, fontWeight: 'bold' }}>🔒</Text>
+                        )}
+                      </View>
+                    );
+                  })
+                )}
               </View>
 
               {/* Behavioral Heatmap */}
@@ -1348,6 +1461,125 @@ return (
         </View>
       </Modal>
 
+      {/* 24-Hour Rule Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showPauseModal}
+        onRequestClose={() => setShowPauseModal(false)}
+      >
+        <View style={styles.briefingOverlay}>
+          <View style={styles.briefingCard}>
+            <Text style={styles.briefingTitle}>Cooling Off Chamber</Text>
+            <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 20, textAlign: 'center' }}>
+              Lock this purchase away for 24 hours. Let the impulse fade.
+            </Text>
+
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, alignSelf: 'flex-start' }}>WHAT DO YOU WANT TO BUY?</Text>
+            <TextInput
+              style={styles.goalInput}
+              placeholder="e.g. New Sony Headphones"
+              placeholderTextColor="#555"
+              value={pauseName}
+              onChangeText={setPauseName}
+            />
+
+            <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 8, marginTop: 16, alignSelf: 'flex-start' }}>PRICE (₹)</Text>
+            <TextInput
+              style={styles.goalInput}
+              placeholder="e.g. 15000"
+              placeholderTextColor="#555"
+              keyboardType="numeric"
+              value={pauseAmount}
+              onChangeText={setPauseAmount}
+            />
+
+            <View style={{ flexDirection: 'row', gap: 12, width: '100%', marginTop: 24 }}>
+              <TouchableOpacity
+                style={[styles.briefingButton, { backgroundColor: 'rgba(255,255,255,0.1)', flex: 1 }]}
+                onPress={() => setShowPauseModal(false)}
+              >
+                <Text style={[styles.briefingButtonText, { color: C.textPrimary }]}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.briefingButton, { flex: 1 }]}
+                onPress={addPendingPurchase}
+              >
+                <Text style={styles.briefingButtonText}>Lock for 24h 🔒</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Manage Streaks Modal */}
+      <Modal
+        animationType="slide"
+        transparent={true}
+        visible={showStreakModal}
+        onRequestClose={() => setShowStreakModal(false)}
+      >
+        <View style={styles.briefingOverlay}>
+          <View style={[styles.briefingCard, { maxHeight: '80%' }]}>
+            <Text style={styles.briefingTitle}>Your Habit Tracker</Text>
+            <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 20, textAlign: 'center' }}>
+              We unlock streaks based on your actual spending habits. Break the chain!
+            </Text>
+
+            {[
+              { id: 'late_night', icon: '🌙', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
+              { id: 'weekend', icon: '🎉', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
+              { id: 'food_delivery', icon: '🛵', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
+              { id: 'online_shopping', icon: '📦', name: 'Online Shopping', desc: 'No Amazon/Flipkart/Myntra' },
+              { id: 'fast_food', icon: '🍔', name: 'Fast Food', desc: 'No McDonalds/KFC/Burger' },
+              { id: 'ride_hailing', icon: '🚗', name: 'Ride Hailing', desc: 'No Uber/Ola/Rapido' },
+              { id: 'coffee', icon: '☕', name: 'Coffee Shops', desc: 'No Starbucks/CCD/Cafe' }
+            ].map(habit => {
+              const isActive = activeStreaks.includes(habit.id);
+              const isUnlocked = unlockedStreaks.includes(habit.id);
+
+              return (
+                <TouchableOpacity
+                  key={habit.id}
+                  style={[
+                    styles.habitRow,
+                    isActive && isUnlocked && { borderColor: C.accent, backgroundColor: 'rgba(56,189,248,0.08)' },
+                    !isUnlocked && { opacity: 0.4 }
+                  ]}
+                  disabled={!isUnlocked}
+                  onPress={() => {
+                    if (isActive) {
+                      setActiveStreaks(activeStreaks.filter(id => id !== habit.id));
+                      saveState({ activeStreaks: activeStreaks.filter(id => id !== habit.id) });
+                    } else {
+                      setActiveStreaks([...activeStreaks, habit.id]);
+                      saveState({ activeStreaks: [...activeStreaks, habit.id] });
+                    }
+                  }}
+                >
+                  <Text style={{ fontSize: 24, marginRight: 14 }}>{habit.icon}</Text>
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{habit.name}</Text>
+                    <Text style={{ color: C.textSecondary, fontSize: 12 }}>
+                      {isUnlocked ? habit.desc : '🔒 Locked - Not detected in your history'}
+                    </Text>
+                  </View>
+                  {isActive && isUnlocked && <Text style={{ color: C.accent, fontSize: 18, fontWeight: 'bold' }}>✓</Text>}
+                  {!isUnlocked && <Text style={{ color: C.textSecondary, fontSize: 18, fontWeight: 'bold' }}>🔒</Text>}
+                </TouchableOpacity>
+              );
+            })}
+
+            <TouchableOpacity
+              style={[styles.briefingButton, { marginTop: 24 }]}
+              onPress={() => setShowStreakModal(false)}
+            >
+              <Text style={styles.briefingButtonText}>Done</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
       {/* Deposit Funds Modal */}
       <Modal
         animationType="slide"
@@ -1486,319 +1718,205 @@ return (
 const styles = StyleSheet.create({
   darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 60 },
   onboardingContent: { flex: 1, justifyContent: 'center' },
-  logo: { color: C.textPrimary, fontSize: 32, fontWeight: '700', marginBottom: 20, letterSpacing: -0.5 },
-  onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34, letterSpacing: -0.5 },
-  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 23 },
+  logo: { color: C.textPrimary, fontSize: 36, fontWeight: '900', marginBottom: 20, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
+  onboardingTitle: { color: C.textPrimary, fontSize: 30, fontWeight: '800', marginBottom: 12, lineHeight: 36, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
+  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 24, fontFamily: Typography.fontFamilyRegular },
   primaryButton: {
-    backgroundColor: C.accent, padding: 18, borderRadius: 16, alignItems: 'center', marginBottom: 20,
-    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.35, shadowRadius: 14, elevation: 6,
+    backgroundColor: C.accent, padding: 18, borderRadius: 18, alignItems: 'center', marginBottom: 20,
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.4, shadowRadius: 16, elevation: 8,
   },
-  primaryButtonText: { color: '#001018', fontSize: 16, fontWeight: '700' },
+  primaryButtonText: { color: '#001018', fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold },
 
   // Dashboard Header
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 26 },
-  greeting: { color: C.textSecondary, fontSize: 13, marginBottom: 4 },
-  headerTitle: { color: C.textPrimary, fontSize: 25, fontWeight: '700', letterSpacing: -0.4 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 30 },
+  greeting: { color: C.textSecondary, fontSize: 14, marginBottom: 4, fontFamily: Typography.fontFamilyRegular },
+  headerTitle: { color: C.textPrimary, fontSize: 26, fontWeight: '800', letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
   syncPill: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass,
     borderWidth: 1, borderColor: C.border, borderTopColor: C.glassHighlight,
-    paddingHorizontal: 13, paddingVertical: 7, borderRadius: 20,
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
   },
   syncDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.success, marginRight: 6 },
-  syncText: { color: C.textSecondary, fontSize: 12, fontWeight: '600' },
+  syncText: { color: C.textSecondary, fontSize: 12, fontWeight: '600', fontFamily: Typography.fontFamilyMedium },
 
-  // Glass Cards -- real depth via shadow, plus a lighter top border for
-  // the "light on glass edge" feel instead of a flat uniform border.
+  wrapButton: {
+    backgroundColor: 'rgba(56,189,248,0.1)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.4)',
+    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+  },
+  wrapButtonText: { color: C.accent, fontSize: 12, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+
+  // Glass Cards -- Real depth via shadow, plus a lighter top border
   glassCard: {
     backgroundColor: C.glass, borderColor: C.border, borderTopColor: C.glassHighlight,
-    borderWidth: 1, borderRadius: 22,
-    shadowColor: C.shadow, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.28, shadowRadius: 18, elevation: 5,
+    borderWidth: 1, borderRadius: 28, // Softer, larger radius
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.3, shadowRadius: 24, elevation: 6,
   },
   glassCardHeavy: {
-    backgroundColor: C.glassStrong, borderColor: C.borderStrong, borderTopColor: C.glassHighlight,
-    borderWidth: 1, borderRadius: 26,
-    shadowColor: C.shadow, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.32, shadowRadius: 22, elevation: 7,
+    backgroundColor: C.glassStrong, borderColor: C.border, borderTopColor: C.glassHighlight,
+    borderWidth: 1, borderRadius: 32, // Even softer for hero cards
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.4, shadowRadius: 32, elevation: 8,
   },
-  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.6, marginBottom: 16 },
+  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.8, marginBottom: 18, fontFamily: Typography.fontFamilyBold },
   cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   cardTitleWithIcon: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  cardTopRowValue: { color: C.accent, fontSize: 14, fontWeight: '700' },
-  subtleText: { color: C.textSecondary, fontSize: 12 },
+  cardTopRowValue: { color: C.accent, fontSize: 14, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+  subtleText: { color: C.textSecondary, fontSize: 12, fontFamily: Typography.fontFamilyRegular },
 
-  iconBadge: { width: 30, height: 30, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  iconBadgeGlyph: { fontSize: 15 },
+  iconBadge: { width: 32, height: 32, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  iconBadgeGlyph: { fontSize: 16 },
 
   ringWrap: {
     width: 108, height: 108, justifyContent: 'center', alignItems: 'center', marginRight: 20,
-    shadowColor: '#38BDF8', // Neon Blue Glow
+    shadowColor: '#38BDF8', // Neon glow behind the ring
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
-    shadowRadius: 20,
+    shadowRadius: 24,
     elevation: 10,
   },
 
-  // Meters -- also reused for the Forecast risk bar and Goal progress
-  // bars now, so every progress indicator in the app shares one visual
-  // family instead of three slightly different bar styles.
-  meterContainer: { marginBottom: 15 },
-  meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 7 },
-  meterLabel: { color: C.textSecondary, fontSize: 12.5 },
-  meterValue: { color: C.textPrimary, fontSize: 12.5, fontWeight: '600' },
-  meterBackground: { height: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)', marginTop: 4 },
+  // Meters
+  meterContainer: { marginBottom: 16 },
+  meterLabelRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  meterLabel: { color: C.textSecondary, fontSize: 13, fontFamily: Typography.fontFamilyMedium },
+  meterValue: { color: C.textPrimary, fontSize: 13, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+  meterBackground: { height: 8, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.06)' },
   meterFill: { height: '100%', borderRadius: 999 },
 
+  // Persona
+  personaIconBadge: {
+    width: 56, height: 56, borderRadius: 18, borderWidth: 1,
+    justifyContent: 'center', alignItems: 'center',
+    shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 6,
+  },
+  personaLabel: { color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 4, fontFamily: Typography.fontFamilyBold },
+  personaName: { fontSize: 18, fontWeight: '800', marginBottom: 4, fontFamily: Typography.fontFamilyBold },
+  personaDesc: { color: C.textSecondary, fontSize: 12, lineHeight: 17, fontFamily: Typography.fontFamilyRegular },
+
+  // Heatmap
+  heatmapGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, justifyContent: 'space-between' },
+  heatmapCell: { width: 26, height: 26, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)' },
+  heatmapLegend: { color: C.textSecondary, fontSize: 10, fontWeight: '600', fontFamily: Typography.fontFamilyMedium },
+  heatmapSelectedText: { color: C.textPrimary, fontSize: 12, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+
   // Subscription Leaks
-  leakRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 13, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
-  leakMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '500' },
-  leakCount: { color: C.textSecondary, fontSize: 11, marginTop: 2 },
-  leakAmount: { color: C.textPrimary, fontSize: 15, fontWeight: '700' },
+  leakRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)' },
+  leakMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '600', fontFamily: Typography.fontFamilyMedium },
+  leakCount: { color: C.textSecondary, fontSize: 11, marginTop: 2, fontFamily: Typography.fontFamilyRegular },
+  leakAmount: { color: C.textPrimary, fontSize: 15, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
 
   // Charts
   chartContainer: { flexDirection: 'row', justifyContent: 'space-between', height: 140, alignItems: 'flex-end', marginTop: 20 },
   chartBarWrapper: { alignItems: 'center', width: 38, height: '100%', justifyContent: 'flex-end' },
   barTooltip: {
-    position: 'absolute', top: 0, backgroundColor: C.accent, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 8,
+    position: 'absolute', top: 0, backgroundColor: C.accent, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 8,
     zIndex: 10, minWidth: 50, left: -6, alignItems: 'center',
     shadowColor: C.accent, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 8, elevation: 4,
   },
-  barTooltipText: { color: '#001018', fontSize: 11, fontWeight: '700', flexWrap: 'nowrap' },
-  chartBarBg: { width: 14, height: '75%', justifyContent: 'flex-end', borderRadius: 7, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.03)' },
+  barTooltipText: { color: '#001018', fontSize: 11, fontWeight: '800', flexWrap: 'nowrap', fontFamily: Typography.fontFamilyBold },
+  chartBarBg: { width: 14, height: '75%', justifyContent: 'flex-end', borderRadius: 8, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.03)' },
   chartBarFill: { width: '100%' },
-  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 7 },
+  chartDayLabel: { color: C.textSecondary, fontSize: 10, marginTop: 8, fontFamily: Typography.fontFamilyMedium },
 
   // Mode Selection
   modeCard: {
-    backgroundColor: C.glass, borderWidth: 1.5, padding: 22, borderRadius: 20, marginBottom: 16,
+    backgroundColor: C.glass, borderWidth: 1.5, padding: 24, borderRadius: 24, marginBottom: 16,
     borderTopColor: C.glassHighlight,
-    shadowColor: C.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 16, elevation: 4,
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 20, elevation: 5,
   },
-  modeTitle: { color: C.textPrimary, fontSize: 18, fontWeight: '700', marginBottom: 8, letterSpacing: -0.2 },
-  modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20 },
+  modeTitle: { color: C.textPrimary, fontSize: 19, fontWeight: '800', marginBottom: 8, letterSpacing: -0.2, fontFamily: Typography.fontFamilyBold },
+  modeText: { color: C.textSecondary, fontSize: 14, lineHeight: 20, fontFamily: Typography.fontFamilyRegular },
 
-  // Tab Bar -- active tab now gets a soft pill background, not just a
-  // color swap.
+  // Tab Bar
   tabBar: {
-    position: 'absolute', bottom: 0, left: 0, right: 0, height: 80,
-    backgroundColor: 'rgba(10,10,10,0.94)', flexDirection: 'row',
-    borderTopWidth: 1, borderTopColor: C.border, paddingBottom: 16, paddingTop: 10,
+    position: 'absolute', bottom: 0, left: 0, right: 0, height: 84,
+    backgroundColor: 'rgba(6,6,8,0.96)', flexDirection: 'row',
+    borderTopWidth: 1, borderTopColor: C.border, paddingBottom: 20, paddingTop: 12,
   },
   tabButton: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 4 },
   tabActivePill: {
-    position: 'absolute', top: 2, width: 44, height: 30, borderRadius: 14,
-    backgroundColor: 'rgba(56,189,248,0.12)',
+    position: 'absolute', top: 4, width: 44, height: 32, borderRadius: 16,
+    backgroundColor: 'rgba(56,189,248,0.12)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.2)'
   },
-  tabIcon: { color: C.textSecondary, fontSize: 21 },
-  tabIconActive: { color: C.accent, fontSize: 22 },
-  tabLabel: { color: 'transparent', fontSize: 10, fontWeight: '600', height: 12 },
-  tabLabelActive: { color: C.accent, fontWeight: '700' },
+  tabIcon: { color: C.textSecondary, fontSize: 22 },
+  tabIconActive: { color: C.accent, fontSize: 22, textShadowColor: C.accent, textShadowOffset: {width: 0, height: 0}, textShadowRadius: 12 },
+  tabLabel: { color: 'transparent', fontSize: 10, fontWeight: '700', height: 12, fontFamily: Typography.fontFamilyBold },
+  tabLabelActive: { color: C.accent },
 
   // AI Morning Briefing Modal
   briefingOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.82)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 24,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 24,
   },
   briefingCard: {
-    width: '100%',
-    backgroundColor: C.glassStrong,
-    borderWidth: 1,
-    borderColor: 'rgba(56,189,248,0.28)',
-    borderTopColor: 'rgba(56,189,248,0.45)', // brighter top edge, same glass-highlight trick, tinted to the modal's own accent
-    borderRadius: 26,
-    padding: 30,
-    alignItems: 'center',
-    shadowColor: C.accent,
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.28,
-    shadowRadius: 26,
-    elevation: 10,
+    width: '100%', backgroundColor: C.glassStrong, borderWidth: 1,
+    borderColor: 'rgba(56,189,248,0.28)', borderTopColor: 'rgba(56,189,248,0.45)',
+    borderRadius: 32, padding: 32, alignItems: 'center',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.3, shadowRadius: 32, elevation: 12,
   },
   briefingIconRing: {
     width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(56,189,248,0.12)',
-    alignItems: 'center', justifyContent: 'center', marginBottom: 14,
+    alignItems: 'center', justifyContent: 'center', marginBottom: 16,
   },
-  briefingIconGlyph: { fontSize: 26 },
+  briefingIconGlyph: { fontSize: 28 },
   briefingTitle: {
-    color: C.textPrimary,
-    fontSize: 22,
-    fontWeight: '700',
-    marginBottom: 16,
-    letterSpacing: -0.3,
+    color: C.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 16, letterSpacing: -0.3, fontFamily: Typography.fontFamilyBold,
   },
   briefingText: {
-    color: C.textPrimary,
-    fontSize: 15,
-    lineHeight: 22,
-    textAlign: 'center',
-    marginBottom: 26,
+    color: C.textPrimary, fontSize: 15, lineHeight: 23, textAlign: 'center', marginBottom: 28, fontFamily: Typography.fontFamilyRegular,
   },
   briefingButton: {
-    backgroundColor: C.accent,
-    paddingVertical: 13,
-    paddingHorizontal: 32,
-    borderRadius: 14,
-    width: '100%',
-    alignItems: 'center',
-    shadowColor: C.accent,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.5,
-    shadowRadius: 10,
-    elevation: 6,
+    backgroundColor: C.accent, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 16, width: '100%', alignItems: 'center',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8,
   },
-  briefingButtonText: {
-    color: '#001018',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  briefingButtonText: { color: '#001018', fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold },
 
-  // AI Behavior Feed -- now with real depth and the same glass-edge
-  // highlight as the other cards, instead of a flat undefined border.
+  // AI Behavior Feed
   insightCard: {
-    width: 260,
-    backgroundColor: C.glass,
-    borderWidth: 1,
-    borderTopColor: C.glassHighlight,
-    borderRadius: 20,
-    padding: 18,
-    marginRight: 12,
-    shadowColor: C.shadow, shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.25, shadowRadius: 14, elevation: 4,
+    width: 260, backgroundColor: C.glass, borderWidth: 1, borderTopColor: C.glassHighlight,
+    borderRadius: 24, padding: 20, marginRight: 12,
+    shadowColor: C.shadow, shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.3, shadowRadius: 18, elevation: 5,
   },
-  insightIconBadge: {
-    width: 32, height: 32, borderRadius: 10, justifyContent: 'center', alignItems: 'center', marginBottom: 12
-  },
-  insightTitle: {
-    fontSize: 11, fontWeight: '800', letterSpacing: 1, marginBottom: 6
-  },
-  insightText: {
-    color: C.textPrimary, fontSize: 13, lineHeight: 19
-  },
+  insightIconBadge: { width: 32, height: 32, borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 14 },
+  insightTitle: { fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 8, fontFamily: Typography.fontFamilyBold },
+  insightText: { color: C.textPrimary, fontSize: 13, lineHeight: 19, fontFamily: Typography.fontFamilyRegular },
+
+  // Forecast Card
+  riskBarBackground: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginTop: 12 },
+  riskBarFill: { height: '100%', borderRadius: 4 },
 
   // Savings Goals
   goalRow: { marginBottom: 18 },
-  goalName: { color: C.textPrimary, fontSize: 14, fontWeight: '600' },
-  goalMeta: { color: C.textSecondary, fontSize: 12 },
-  goalDeadline: { color: C.textSecondary, fontSize: 11 },
+  goalName: { color: C.textPrimary, fontSize: 14, fontWeight: '700', fontFamily: Typography.fontFamilyMedium },
+  goalMeta: { color: C.textSecondary, fontSize: 12, fontFamily: Typography.fontFamilyRegular },
+  goalProgressBg: { height: 8, borderRadius: 4, backgroundColor: 'rgba(255,255,255,0.06)', overflow: 'hidden', marginVertical: 6 },
+  goalProgressFill: { height: '100%', borderRadius: 4 },
+  goalDeadline: { color: C.textSecondary, fontSize: 11, fontFamily: Typography.fontFamilyRegular },
   goalInput: {
-    width: '100%',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: C.border,
-    borderTopColor: C.glassHighlight,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    color: C.textPrimary,
-    fontSize: 15,
+    width: '100%', backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: C.border,
+    borderRadius: 14, paddingHorizontal: 16, paddingVertical: 14, color: C.textPrimary, fontSize: 15, fontFamily: Typography.fontFamilyRegular,
   },
+  depositButton: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4, backgroundColor: 'rgba(255,255,255,0.03)' },
+  depositButtonText: { fontSize: 11, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
 
-  // Week Selector -- active chip now lifts slightly with its own shadow
+  // Week Selector
   weekChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    marginRight: 10,
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 20, backgroundColor: 'rgba(255,255,255,0.05)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', marginRight: 10,
   },
-  weekChipActive: {
-    backgroundColor: 'rgba(56,189,248,0.15)',
-    borderColor: 'rgba(56,189,248,0.4)',
-    shadowColor: C.accent, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 3,
-  },
-  weekChipText: {
-    color: C.textSecondary,
-    fontSize: 12,
-    fontWeight: '600'
-  },
-  weekChipTextActive: {
-    color: C.accent,
-    fontWeight: 'bold'
+  weekChipActive: { backgroundColor: 'rgba(56,189,248,0.15)', borderColor: 'rgba(56,189,248,0.4)' },
+  weekChipText: { color: C.textSecondary, fontSize: 12, fontWeight: '600', fontFamily: Typography.fontFamilyMedium },
+  weekChipTextActive: { color: C.accent, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+
+  // Habit Tracker
+  habitRow: {
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 16, paddingHorizontal: 16,
+    borderWidth: 1, borderColor: C.border, borderRadius: 16, marginBottom: 10,
   },
 
-  // Persona Card -- icon badge now gets a glow tinted to that persona's
-  // color, added inline via shadowColor override in JSX.
-  personaIconBadge: {
-    width: 56, height: 56, borderRadius: 16, borderWidth: 1,
-    justifyContent: 'center', alignItems: 'center',
-    shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 10, elevation: 5,
-  },
-  personaLabel: { color: C.textSecondary, fontSize: 10, fontWeight: '700', letterSpacing: 1.2, marginBottom: 4 },
-  personaName: { fontSize: 18, fontWeight: '800', marginBottom: 4 },
-  personaDesc: { color: C.textSecondary, fontSize: 12, lineHeight: 17 },
-
-  // Heatmap
-  heatmapGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    justifyContent: 'space-between',
-  },
-  heatmapCell: {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-  },
-  heatmapLegend: {
-    color: C.textSecondary, fontSize: 10, fontWeight: '600'
-  },
-  heatmapSelectedText: {
-    color: C.textPrimary,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-
-  // Expanded repetitive-payment detail list -- now reads as "a drawer
-  // opening from the row above it" via a colored left accent border,
-  // instead of a disconnected plain list.
-  expandedList: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    gap: 8,
-    marginLeft: 4,
-    borderLeftWidth: 2,
-    borderLeftColor: 'rgba(245,158,11,0.35)',
-  },
-  expandedText: {
-    color: C.textSecondary,
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  // Monthly Wrap Button & Stats
-  wrapButton: {
-    backgroundColor: 'rgba(56,189,248,0.1)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.4)',
-    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
-  },
-  wrapButtonText: { color: C.accent, fontSize: 12, fontWeight: '700' },
+  // Monthly Wrap
   wrapStatRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)'
   },
-  wrapStatLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1 },
-  wrapStatValue: { color: C.textPrimary, fontSize: 14, fontWeight: '700' },
-    // Deposit Button
-    depositButton: {
-      borderWidth: 1,
-      borderRadius: 8,
-      paddingHorizontal: 10,
-      paddingVertical: 4,
-      backgroundColor: 'rgba(255,255,255,0.03)',
-    },
-    depositButtonText: {
-      fontSize: 11,
-      fontWeight: '700',
-    },
-  logo: { color: C.textPrimary, fontSize: 32, fontWeight: '700', marginBottom: 20, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
-  onboardingTitle: { color: C.textPrimary, fontSize: 28, fontWeight: '700', marginBottom: 12, lineHeight: 34, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
-  onboardingSubtext: { color: C.textSecondary, fontSize: 16, lineHeight: 23, fontFamily: Typography.fontFamilyRegular },
-  headerTitle: { color: C.textPrimary, fontSize: 25, fontWeight: '700', letterSpacing: -0.4, fontFamily: Typography.fontFamilyBold },
-  heroBalance: { color: C.textPrimary, fontSize: 42, fontWeight: '900', letterSpacing: -1, fontFamily: Typography.fontFamilyBold },
-  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.6, marginBottom: 16, fontFamily: Typography.fontFamilyBold },
-  leakMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '500', fontFamily: Typography.fontFamilyMedium },
-
-  meterBackground: { height: 7, borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.05)' },
-  meterFill: { height: '100%', borderRadius: 999 },
+  wrapStatLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, fontFamily: Typography.fontFamilyBold },
+  wrapStatValue: { color: C.textPrimary, fontSize: 14, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
 });
