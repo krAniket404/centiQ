@@ -735,18 +735,27 @@ export default function App() {
 
       // TRIGGER THE FADE & SLIDE ANIMATION!
       Animated.parallel([
-        Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
-        Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true })
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 600,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        })
       ]).start();
 
-      // CHECK FOR "WOW" FIRST LAUNCH
-      const hasSeenWow = await SmsModule.loadData('has_seen_wow');
-      if (!hasSeenWow) {
-        setShowWowModal(true);
-        await SmsModule.saveData('has_seen_wow', 'true');
-      }
+      // SAVE DATA TO PHONE STORAGE (Fixes the reset bug!)
+      saveState({
+        transactions: parsedTxns,
+        scores: { discipline, impulse, volatility, wellness, savingsRate }
+      });
 
-    } catch (e) { console.error("Failed to read SMS", e); }
+    } catch (e) {
+      console.error("Failed to read SMS", e);
+    }
   };
 
   const handleRefresh = async () => {
@@ -959,10 +968,6 @@ export default function App() {
             style={[styles.modeCard, { borderColor: 'rgba(16,185,129,0.4)' }]}
             activeOpacity={0.85}
             onPress={() => {
-              if (!isPro) {
-                setActiveTab('coach'); // Triggers the Paywall
-                return;
-              }
               setMode('liberal');
               saveState({ mode: 'liberal' });
             }}
@@ -1060,7 +1065,7 @@ return (
                   )}
                 </View>
               )}
-          
+
               {/* Dynamic Discipline Streaks Card */}
               <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
