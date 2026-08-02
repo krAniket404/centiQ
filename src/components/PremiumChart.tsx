@@ -13,36 +13,28 @@ interface PremiumChartProps {
 }
 
 export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }: PremiumChartProps) {
-  // Add right padding so the ₹ labels don't get cut off
   const CHART_WIDTH = Dimensions.get('window').width - 80 - 30;
   const CHART_HEIGHT = 150;
   const PADDING_TOP = 15;
   const PADDING_BOTTOM = 25;
   const USABLE_HEIGHT = CHART_HEIGHT - PADDING_TOP - PADDING_BOTTOM;
 
-  // Calculate "Nice" Maximum (Rounds up to nearest 1000)
   const rawMax = maxValue ? Math.max(maxValue, 1) : Math.max(...data.map(d => Number(d.amount) || 0), 1);
   const niceMax = Math.ceil(rawMax / 1000) * 1000;
   const maxVal = niceMax > 0 ? niceMax : 1000;
 
-  // Determine step size (2000 if max is high, 1000 if max is low)
   const stepSize = maxVal >= 6000 ? 2000 : 1000;
-
-  // Generate the specific values to show on the grid (e.g., [2000, 4000, 6000, 8000])
   const gridValues = [];
   for (let v = stepSize; v <= maxVal; v += stepSize) {
     gridValues.push(v);
   }
 
-  // Map data to exact X and Y coordinates on the screen
-  // FIX: Handle data.length === 1 to prevent division by zero
   const points = data.map((d, i) => {
     const x = data.length > 1 ? (i / (data.length - 1)) * CHART_WIDTH : CHART_WIDTH / 2;
     const y = PADDING_TOP + USABLE_HEIGHT - ((Number(d.amount) || 0) / maxVal) * USABLE_HEIGHT;
     return { x, y, value: Number(d.amount) || 0, day: d.day };
   });
 
-  // 1. Draw the Area Fill (simulated gradient polygon)
   const fillBars = [];
   const steps = 80;
   for (let i = 0; i < steps; i++) {
@@ -54,7 +46,6 @@ export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }
     const x = p1.x + (p2.x - p1.x) * localT;
     const y = p1.y + (p2.y - p1.y) * localT;
 
-    // Calculate opacity for gradient effect (fades towards bottom)
     const heightFraction = (CHART_HEIGHT - y) / CHART_HEIGHT;
     const opacity = 0.25 - (heightFraction * 0.20);
 
@@ -73,7 +64,6 @@ export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }
     );
   }
 
-  // 2. Draw the Smooth Line
   const lines = [];
   for (let i = 0; i < points.length - 1; i++) {
     const p1 = points[i];
@@ -110,7 +100,6 @@ export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }
     <View style={styles.container}>
       <View style={{ width: CHART_WIDTH, height: CHART_HEIGHT, marginLeft: 15 }}>
 
-        {/* Horizontal Grid Lines & Scale Labels */}
         {gridValues.map((val, i) => {
           const frac = 1 - (val / maxVal);
           const y = PADDING_TOP + (USABLE_HEIGHT * frac);
@@ -121,13 +110,9 @@ export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }
           );
         })}
 
-        {/* Render Area Fill */}
         {fillBars}
-
-        {/* Render Lines */}
         {lines}
 
-        {/* Data Points (Dots) */}
         {points.map((p, i) => (
           <TouchableOpacity
             key={`dot-${i}`}
@@ -149,7 +134,6 @@ export default function PremiumChart({ data, activeDay, setActiveDay, maxValue }
         ))}
       </View>
 
-      {/* X Axis Labels */}
       <View style={[styles.xAxis, { width: CHART_WIDTH, marginLeft: 15 }]}>
         {data.map((d, i) => (
           <Text key={i} style={[styles.xAxisLabel, activeDay === i && styles.xAxisLabelActive]}>

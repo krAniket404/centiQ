@@ -4,7 +4,6 @@ import {
   Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share, TextInput, Dimensions, RefreshControl, Vibration, Animated,
   LayoutAnimation, UIManager, Platform
 } from 'react-native';
-import { Typography } from './src/theme/typography';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
 import { backfillHistory } from './src/lib/historicalSync';
@@ -20,6 +19,13 @@ import AuthScreen from './src/screens/AuthScreen';
 import { Session } from '@supabase/supabase-js';
 import { getScoreColor as getDynamicScoreColor } from './src/theme/scoreColor';
 import PaywallScreen from './src/screens/PaywallScreen';
+import AnimatedNumber from './src/components/AnimatedNumber';
+import SkeletonCard from './src/components/SkeletonCard';
+import { MONEY_QUOTES } from './src/lib/quotes';
+import { Typography } from './src/theme/typography';
+import WowModal from './src/components/WowModal';
+import WellnessCard from './src/components/WellnessCard';
+import MonthlyWrapModal from './src/components/MonthlyWrapModal';
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -53,6 +59,7 @@ const C = {
 const triggerHaptic = (ms: number = 15) => {
   Vibration.vibrate(ms);
 };
+
 export default function App() {
   const [goals, setGoals] = useState<any[]>([]);
   const [showAddGoalModal, setShowAddGoalModal] = useState(false);
@@ -75,6 +82,10 @@ export default function App() {
   const [activeStreaks, setActiveStreaks] = useState<string[]>(['late_night']);
   const [showStreakModal, setShowStreakModal] = useState(false);
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
+  const [forecastAnim] = useState(new Animated.Value(0));
+  const [morningQuote, setMorningQuote] = useState<string | null>(null);
+  const [showWowModal, setShowWowModal] = useState(false);
+  const [manualCategories, setManualCategories] = useState<{[key: string]: string}>({});
 
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
@@ -111,6 +122,39 @@ export default function App() {
   ]).current;
 
   // --- ALL HOOKS MUST BE HERE, AT THE TOP LEVEL ---
+
+  // Schedule Daily Behavioral Reminders
+  useEffect(() => {
+    if (scores.wellness > 0 && Array.isArray(transactions) && transactions.length > 0) {
+      const now = new Date();
+      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      const dayOfMonth = now.getDate();
+      const daysLeft = Math.max(daysInMonth - dayOfMonth, 1);
+
+      const spentSoFar = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
+      const monthlyIncome = transactions.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
+      const remaining = monthlyIncome - spentSoFar;
+      const dailyAllowance = remaining > 0 ? Math.round(remaining / daysLeft) : 0;
+
+      // 1. 8:00 AM - Daily Allowance Reminder
+      const morningMsg = dailyAllowance > 0
+        ? `You have ₹${dailyAllowance.toLocaleString('en-IN')} left to spend today to stay on track.`
+        : `You are over budget. Try to minimize spending today.`;
+
+      SmsModule.scheduleDailyReminder(8, 0, "CentiQ Daily Check-in", morningMsg)
+        .catch((e: any) => console.warn("Failed to schedule morning reminder", e));
+
+      // 2. 9:00 PM - Streak Warning (Only if they have an active streak)
+      if (activeStreaks && activeStreaks.length > 0) {
+        const maxStreak = Math.max(...Object.values(streakData).map(Number));
+        if (maxStreak > 0) {
+          const nightMsg = `Don't break your 🔥 ${maxStreak}-day streak! No late-night spending.`;
+          SmsModule.scheduleDailyReminder(21, 0, "Streak Warning", nightMsg)
+            .catch((e: any) => console.warn("Failed to schedule night reminder", e));
+        }
+      }
+    }
+  }, [scores, transactions, activeStreaks, streakData]);
 
   useEffect(() => {
     const animations = [
@@ -263,6 +307,48 @@ export default function App() {
   }, [transactions]);
 
   // --- ALL BULLETPROOF USEMEMO HOOKS ---
+
+  // Calculate Daily Quote (Changes every day, stays same all day)
+  const dailyQuote = useMemo(() => {
+    if (!MONEY_QUOTES || MONEY_QUOTES.length === 0) return null;
+    const now = new Date();
+    const startOfYear = new Date(now.getFullYear(), 0, 0);
+    const diff = now.getTime() - startOfYear.getTime();
+    const oneDay = 1000 * 60 * 60 * 24;
+    const dayOfYear = Math.floor(diff / oneDay);
+
+    // Pick the quote that matches the day of the year (loops if > 366)
+    const quoteIndex = dayOfYear % MONEY_QUOTES.length;
+    return MONEY_QUOTES[quoteIndex];
+  }, []);
+
+  // Calculate "Wow" Insights for the first launch
+  const wowInsights = useMemo(() => {
+    if (!Array.isArray(transactions) || transactions.length === 0) return null;
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    if (debitTxns.length === 0) return null;
+    const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
+
+    // 1. Late Night Spending (After 9 PM)
+    const lateNightTxns = debitTxns.filter(t => t.date.getHours() >= 21 || t.date.getHours() <= 4);
+    const dayTxns = debitTxns.filter(t => t.date.getHours() > 4 && t.date.getHours() < 21);
+    const avgLate = lateNightTxns.length > 0 ? lateNightTxns.reduce((a, b) => a + b.amount, 0) / lateNightTxns.length : 0;
+    const avgDay = dayTxns.length > 0 ? dayTxns.reduce((a, b) => a + b.amount, 0) / dayTxns.length : 0;
+    const lateNightPct = avgDay > 0 ? Math.round(((avgLate - avgDay) / avgDay) * 100) : 0;
+
+    // 2. Worst Day of the Week
+    const dayTotals: { [key: string]: number } = {};
+    debitTxns.forEach(t => { const d = t.date.getDay(); dayTotals[d] = (dayTotals[d] || 0) + t.amount; });
+    const maxDayIndex = Object.keys(dayTotals).sort((a, b) => dayTotals[b] - dayTotals[a])[0];
+    const dayNames = ['Sundays', 'Mondays', 'Tuesdays', 'Wednesdays', 'Thursdays', 'Fridays', 'Saturdays'];
+    const maxDayName = dayNames[maxDayIndex];
+    const maxDayPct = totalSpend > 0 ? Math.round((dayTotals[maxDayIndex] / totalSpend) * 100) : 0;
+
+    // 3. Overspend Forecast
+    const overspendAmount = (monthlyForecast?.projectedSpend || 0) - (transactions.filter(t => t.type === 'credit' && t.date.getMonth() === new Date().getMonth()).reduce((a, b) => a + b.amount, 0));
+
+    return { lateNightPct, maxDayName, maxDayPct, overspendAmount };
+  }, [transactions, monthlyForecast]);
 
   const avgAmount = useMemo(() => {
     if (!Array.isArray(transactions) || transactions.length === 0) return 0;
@@ -489,8 +575,8 @@ export default function App() {
       if (parsed.worthItTxnIds) setWorthItTxnIds(parsed.worthItTxnIds);
       if (parsed.goals) setGoals(parsed.goals);
       if (parsed.activeStreaks) setActiveStreaks(parsed.activeStreaks);
+      if (parsed.manualCategories) setManualCategories(parsed.manualCategories); // <-- ADD THIS
 
-      // FIX: Convert date strings back into actual Date objects!
       if (Array.isArray(parsed.transactions)) {
         const hydratedTxns = parsed.transactions.map((t: any) => ({
           ...t,
@@ -513,7 +599,8 @@ export default function App() {
       goals: overrides.goals ?? goals,
       transactions: overrides.transactions ?? transactions,
       scores: overrides.scores ?? scores,
-      activeStreaks: overrides.activeStreaks ?? activeStreaks, // <-- ADD THIS
+      activeStreaks: overrides.activeStreaks ?? activeStreaks,
+      manualCategories: overrides.manualCategories ?? manualCategories, // <-- ADD THIS
     };
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
@@ -534,10 +621,11 @@ export default function App() {
 
   const requestPermission = async () => {
     try {
-      // Ask for both READ and RECEIVE permissions
+      // Ask for SMS, RECEIVE_SMS, and POST_NOTIFICATIONS permissions
       const granted = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.READ_SMS,
-        PermissionsAndroid.PERMISSIONS.RECEIVE_SMS
+        PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS //
       ]);
 
       if (
@@ -587,7 +675,11 @@ export default function App() {
       } else {
         setMorningBriefing("Good morning! Ready to make some smart financial moves today?");
       }
+      const randomQuote = MONEY_QUOTES[Math.floor(Math.random() * MONEY_QUOTES.length)];
+      setMorningQuote(randomQuote);
+
     } catch (e) {
+      // ... existing catch logic ...
       setMorningBriefing("Good morning! Ready to make some smart financial moves today?");
     } finally {
       setIsFetchingBriefing(false);
@@ -643,17 +735,16 @@ export default function App() {
 
       // TRIGGER THE FADE & SLIDE ANIMATION!
       Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        })
+        Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true })
       ]).start();
+
+      // CHECK FOR "WOW" FIRST LAUNCH
+      const hasSeenWow = await SmsModule.loadData('has_seen_wow');
+      if (!hasSeenWow) {
+        setShowWowModal(true);
+        await SmsModule.saveData('has_seen_wow', 'true');
+      }
 
     } catch (e) { console.error("Failed to read SMS", e); }
   };
@@ -691,6 +782,15 @@ export default function App() {
     const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
     setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
     saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
+  };
+
+  const handleSetCategory = (txnId: string, newCategory: string) => {
+    const updated = { ...manualCategories, [txnId]: newCategory };
+    setManualCategories(updated);
+    saveState({ manualCategories: updated });
+
+    // Update the transactions array instantly so the UI refreshes
+    setTransactions(prev => prev.map(t => t.id === txnId ? { ...t, category: newCategory } : t));
   };
 
   const syncToCloud = async (txns: ParsedTransaction[]) => {
@@ -824,14 +924,14 @@ export default function App() {
   };
 
   //TEMPORARILY BYPASS LOGIN TO TEST THE APP
-  //if (!session) {
-  //  return <AuthScreen />;
-  //}
+  if (!session) {
+      return <AuthScreen />;
+  }
 
   if (!hasPermission) {
     return (
       <View style={styles.darkContainer}>
-        <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" />
         <View style={styles.onboardingContent}>
           <Text style={styles.logo}>CentiQ</Text>
           <Text style={styles.onboardingTitle}>Understand your money habits.</Text>
@@ -847,7 +947,7 @@ export default function App() {
   if (!mode) {
     return (
       <View style={styles.darkContainer}>
-        <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" />
         <View style={styles.onboardingContent}>
           <Text style={styles.logo}>Choose your style</Text>
           <Text style={styles.onboardingSubtext}>How do you want CentiQ to analyze your spending?</Text>
@@ -877,7 +977,7 @@ export default function App() {
 
 return (
     <View style={styles.darkContainer}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="#060608" />
 
       {activeTab === 'dashboard' ? (
         <FlatList
@@ -888,16 +988,30 @@ return (
             <RefreshControl
               refreshing={isRefreshing}
               onRefresh={handleRefresh}
-              tintColor={C.accent} // Makes the spinner blue!
+              tintColor={C.accent}
             />
           }
+          ListEmptyComponent={() => (
+            <View style={{ marginTop: 20 }}>
+              <SkeletonCard />
+              <SkeletonCard />
+              <SkeletonCard />
+            </View>
+          )}
           ListHeaderComponent={() => (
             <Animated.View style={{ opacity: fadeAnim, transform: [{ translateY: slideAnim }] }}>
               {/* Header */}
               <View style={styles.headerRow}>
                 <View>
-                  <Text style={styles.greeting}>Welcome back</Text>
-                  <Text style={styles.headerTitle}>Your money, decoded.</Text>
+                  <Text style={styles.greeting}>
+                    {(() => {
+                      const h = new Date().getHours();
+                      if (h < 12) return 'Good morning ☀️';
+                      if (h < 17) return 'Good afternoon 🌤️';
+                      if (h < 22) return 'Good evening 🌙';
+                      return 'Working late? 🦉';
+                    })()}
+                  </Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                   <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowMonthlyWrap(true)}>
@@ -911,44 +1025,7 @@ return (
               </View>
 
               {/* Financial Wellness Card (Heavy Glass) */}
-              <View style={[styles.glassCardHeavy, { padding: 24, marginBottom: 18 }]}>
-                <Text style={[styles.cardHeaderTitle, { marginBottom: 22 }]}>FINANCIAL WELLNESS</Text>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                  {/* Left Side: Circle */}
-                  <View style={styles.ringWrap}>
-                    <CircularScoreCard score={scores.wellness} label="Score" color={getDynamicScoreColor(scores.wellness, 'higher_is_better')} size={100} />
-                  </View>
-
-                  {/* Right Side: Meters */}
-                  <View style={{ flex: 1, justifyContent: 'center' }}>
-                    <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Discipline</Text><Text style={styles.meterValue}>{scores.discipline}/100</Text></View>
-                      <View style={styles.meterBackground}>
-                        <View style={[styles.meterFill, { width: `${scores.discipline}%`, backgroundColor: getDynamicScoreColor(scores.discipline, 'higher_is_better') }]} />
-                      </View>
-                    </View>
-                    <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Impulse Index</Text><Text style={styles.meterValue}>{scores.impulse}/100</Text></View>
-                      <View style={styles.meterBackground}>
-                        <View style={[styles.meterFill, { width: `${scores.impulse}%`, backgroundColor: getDynamicScoreColor(scores.impulse, 'lower_is_better') }]} />
-                      </View>
-                    </View>
-                    <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Volatility</Text><Text style={styles.meterValue}>{scores.volatility}/100</Text></View>
-                      <View style={styles.meterBackground}>
-                        <View style={[styles.meterFill, { width: `${scores.volatility}%`, backgroundColor: getDynamicScoreColor(scores.volatility, 'lower_is_better') }]} />
-                      </View>
-                    </View>
-                    <View style={styles.meterContainer}>
-                      <View style={styles.meterLabelRow}><Text style={styles.meterLabel}>Savings Rate</Text><Text style={styles.meterValue}>{Math.round(scores.savingsRate)}/100</Text></View>
-                      <View style={styles.meterBackground}>
-                        <View style={[styles.meterFill, { width: `${scores.savingsRate}%`, backgroundColor: getDynamicScoreColor(scores.savingsRate, 'higher_is_better') }]} />
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              </View>
+              <WellnessCard scores={scores} />
 
               {/* Financial Persona Card */}
               <View style={[styles.glassCardHeavy, { padding: 22, marginBottom: 18, flexDirection: 'row', alignItems: 'center' }]}>
@@ -969,6 +1046,21 @@ return (
                 </View>
               </View>
 
+              {/* Daily Money Quote Card */}
+              {dailyQuote && (
+                <View style={[styles.glassCard, { padding: 22, marginBottom: 18, borderLeftWidth: 3, borderLeftColor: C.accent }]}>
+                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 10, fontFamily: Typography.fontFamilyBold }}>QUOTE OF THE DAY</Text>
+                  <Text style={{ color: C.textPrimary, fontSize: 15, lineHeight: 22, fontStyle: 'italic', fontFamily: Typography.fontFamilyRegular, marginBottom: 8 }}>
+                    "{dailyQuote.split(' - ')[0]}"
+                  </Text>
+                  {dailyQuote.split(' - ')[1] && (
+                    <Text style={{ color: C.textSecondary, fontSize: 13, fontWeight: '700', fontFamily: Typography.fontFamilyBold }}>
+                      - {dailyQuote.split(' - ')[1]}
+                    </Text>
+                  )}
+                </View>
+              )}
+          
               {/* Dynamic Discipline Streaks Card */}
               <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
@@ -1243,28 +1335,32 @@ return (
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                   <View>
                     <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Projected Spend</Text>
-                    <Text style={{ color: C.textPrimary, fontSize: 22, fontWeight: '800' }}>
-                      ₹{monthlyForecast.projectedSpend.toLocaleString('en-IN')}
+                    <Text style={{ color: C.textPrimary, fontSize: 22, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>
+                      ₹{(monthlyForecast?.projectedSpend || 0).toLocaleString('en-IN')}
                     </Text>
                   </View>
 
                   <View style={{ alignItems: 'flex-end' }}>
                     <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Overspend Risk</Text>
-                    <Text style={{ color: monthlyForecast.riskColor, fontSize: 22, fontWeight: '800' }}>
-                      {monthlyForecast.overspendRisk}%
+                    <Text style={{ color: monthlyForecast?.riskColor || C.accent, fontSize: 22, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>
+                      {monthlyForecast?.overspendRisk || 0}%
                     </Text>
                   </View>
                 </View>
 
-                {/* Risk Bar -- now matches the wellness meters' height/radius */}
-                <View style={styles.meterBackground}>
+                {/* Risk Bar */}
+                <View style={styles.riskBarBackground}>
                   <View style={[
-                    styles.meterFill,
-                    { width: `${monthlyForecast.overspendRisk}%`, backgroundColor: monthlyForecast.riskColor }
+                    styles.riskBarFill,
+                    {
+                      width: `${monthlyForecast?.overspendRisk || 0}%`,
+                      backgroundColor: monthlyForecast?.riskColor || C.accent
+                    }
                   ]} />
                 </View>
-                <Text style={{ color: monthlyForecast.riskColor, fontSize: 11, fontWeight: '700', marginTop: 8, textAlign: 'right' }}>
-                  {monthlyForecast.riskLevel.toUpperCase()} RISK
+
+                <Text style={{ color: monthlyForecast?.riskColor || C.accent, fontSize: 11, fontWeight: '700', marginTop: 8, textAlign: 'right', fontFamily: Typography.fontFamilyBold }}>
+                  {(monthlyForecast?.riskLevel || 'LOW').toUpperCase()} RISK
                 </Text>
               </View>
 
@@ -1356,10 +1452,11 @@ return (
           mode={mode}
           userLabels={userLabels}
           labeledTxnIds={labeledTxnIds}
-          worthItTxnIds={worthItTxnIds} // <-- ADD THIS LINE
+          worthItTxnIds={worthItTxnIds}
           avgAmount={avgAmount}
           model={model}
           handleLabelTransaction={handleLabelTransaction}
+          onSetCategory={handleSetCategory}
         />
       ) : activeTab === 'budgets' ? (
         <BudgetsScreen transactions={transactions} />
@@ -1396,6 +1493,15 @@ return (
             ) : (
               <>
                 <Text style={styles.briefingText}>{morningBriefing}</Text>
+
+                {/* NEW: Daily Money Quote */}
+                {morningQuote && (
+                  <View style={styles.quoteBox}>
+                    <Text style={styles.quoteText}>"{morningQuote.split(' - ')[0]}"</Text>
+                    <Text style={styles.quoteAuthor}>- {morningQuote.split(' - ')[1]}</Text>
+                  </View>
+                )}
+
                 <TouchableOpacity
                   style={styles.briefingButton}
                   activeOpacity={0.85}
@@ -1634,87 +1740,80 @@ return (
         </View>
       </Modal>
 
-      {/* Monthly Wrap Modal */}
+
+      {/* "Wow" Initial Insights Modal */}
       <Modal
-        animationType="slide"
+        animationType="fade"
         transparent={true}
-        visible={showMonthlyWrap}
-        onRequestClose={() => setShowMonthlyWrap(false)}
+        visible={showWowModal && wowInsights !== null}
+        onRequestClose={() => setShowWowModal(false)}
       >
-        <View style={styles.briefingOverlay}>
-          <View style={[styles.briefingCard, { padding: 28, width: '100%' }]}>
+        <View style={[styles.briefingOverlay, { backgroundColor: 'rgba(0,0,0,0.95)' }]}>
+          <View style={[styles.briefingCard, { padding: 32, width: '100%' }]}>
 
-            {/* Header */}
-            <View style={{ alignItems: 'center', marginBottom: 24 }}>
-              <Text style={{ fontSize: 40, marginBottom: 8 }}>📊</Text>
-              <Text style={[styles.briefingTitle, { marginBottom: 4 }]}>Monthly Wrap</Text>
-              <Text style={{ color: C.textSecondary, fontSize: 13, fontFamily: Typography.fontFamilyRegular }}>A snapshot of your spending behavior.</Text>
-            </View>
+            <Text style={{ fontSize: 44, marginBottom: 16, textAlign: 'center' }}>🧠</Text>
+            <Text style={[styles.briefingTitle, { fontSize: 26, marginBottom: 8 }]}>We decoded your money.</Text>
+            <Text style={{ color: C.textSecondary, fontSize: 14, marginBottom: 28, textAlign: 'center', fontFamily: Typography.fontFamilyRegular }}>
+              Here is what your spending history is hiding from you:
+            </Text>
 
-            {/* Wellness Score Hero */}
-            <View style={{ alignItems: 'center', marginBottom: 20, paddingVertical: 20, backgroundColor: 'rgba(56,189,248,0.05)', borderRadius: 20, width: '100%' }}>
-              <Text style={{ color: C.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 8, fontFamily: Typography.fontFamilyBold }}>WELLNESS SCORE</Text>
-              <Text style={{ color: getDynamicScoreColor(scores.wellness, 'higher_is_better'), fontSize: 48, fontWeight: '900', fontFamily: Typography.fontFamilyBold }}>
-                {scores.wellness}<Text style={{ fontSize: 20, color: C.textSecondary }}> /100</Text>
-              </Text>
-            </View>
-
-            {/* Persona Badge */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${behavioralProfile.persona.color}10`, padding: 16, borderRadius: 16, marginBottom: 16, width: '100%' }}>
-              <Text style={{ fontSize: 24, marginRight: 14 }}>{behavioralProfile.persona.icon}</Text>
-              <View style={{ flex: 1 }}>
-                <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2, fontFamily: Typography.fontFamilyBold }}>FINANCIAL PERSONA</Text>
-                <Text style={{ color: behavioralProfile.persona.color, fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>{behavioralProfile.persona.name}</Text>
-              </View>
-            </View>
-
-            {/* Stats Grid */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginBottom: 16 }}>
-              <View style={{ backgroundColor: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 16, flex: 1, marginRight: 8 }}>
-                <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6, fontFamily: Typography.fontFamilyBold }}>TOTAL SPENT</Text>
-                <Text style={{ color: C.textPrimary, fontSize: 18, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>₹{Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}</Text>
-              </View>
-              <View style={{ backgroundColor: 'rgba(255,255,255,0.04)', padding: 16, borderRadius: 16, flex: 1, marginLeft: 8 }}>
-                <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 6, fontFamily: Typography.fontFamilyBold }}>TOP CATEGORY</Text>
-                <Text style={{ color: C.textPrimary, fontSize: 18, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>{monthlyWrapData.topCat}</Text>
-              </View>
-            </View>
-
-            {/* Biggest Impulse Highlight */}
-            {monthlyWrapData.biggestImpulse && (
-              <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.08)', padding: 16, borderRadius: 16, width: '100%', marginBottom: 24 }}>
-                <Text style={{ fontSize: 24, marginRight: 14 }}>🔥</Text>
-                <View style={{ flex: 1 }}>
-                  <Text style={{ color: C.danger, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2, fontFamily: Typography.fontFamilyBold }}>BIGGEST IMPULSE</Text>
-                  <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700', fontFamily: Typography.fontFamilyBold }} numberOfLines={1}>
-                    {monthlyWrapData.biggestImpulse.merchant}
-                  </Text>
-                  <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 2, fontFamily: Typography.fontFamilyRegular }}>₹{Math.round(monthlyWrapData.biggestImpulse.amount).toLocaleString('en-IN')}</Text>
-                </View>
+            {/* Insight 1 */}
+            {wowInsights?.lateNightPct > 0 && (
+              <View style={styles.wowInsightRow}>
+                <Text style={styles.wowIcon}>🌙</Text>
+                <Text style={styles.wowText}>
+                  You spend <Text style={{ color: C.warning, fontWeight: '900' }}>{wowInsights.lateNightPct}% more</Text> per transaction after 9 PM.
+                </Text>
               </View>
             )}
 
-            {/* Buttons */}
+            {/* Insight 2 */}
+            {wowInsights?.maxDayPct > 0 && (
+              <View style={styles.wowInsightRow}>
+                <Text style={styles.wowIcon}>📅</Text>
+                <Text style={styles.wowText}>
+                  <Text style={{ color: C.accent, fontWeight: '900' }}>{wowInsights.maxDayName}</Text> account for {wowInsights.maxDayPct}% of your total spending.
+                </Text>
+              </View>
+            )}
+
+            {/* Insight 3 */}
+            {wowInsights?.overspendAmount > 0 && (
+              <View style={styles.wowInsightRow}>
+                <Text style={styles.wowIcon}>📈</Text>
+                <Text style={styles.wowText}>
+                  If you repeat last month's pattern, you'll overspend by <Text style={{ color: C.danger, fontWeight: '900' }}>₹{Math.round(wowInsights.overspendAmount).toLocaleString('en-IN')}</Text>.
+                </Text>
+              </View>
+            )}
+
             <TouchableOpacity
-              style={[styles.briefingButton, { marginBottom: 12 }]}
-              onPress={async () => {
-                await Share.share({
-                  message: `My CentiQ Monthly Wrap!\nWellness: ${scores.wellness}/100\nPersona: ${monthlyWrapData.persona.name}\nTotal Spent: ₹${Math.round(monthlyWrapData.totalSpend).toLocaleString('en-IN')}\nTop Category: ${monthlyWrapData.topCat}\n\nDecode your spending behavior with CentiQ.`
-                });
-              }}
+              style={[styles.briefingButton, { marginTop: 32 }]}
+              onPress={() => setShowWowModal(false)}
             >
-              <Text style={styles.briefingButtonText}>Share to Instagram / WhatsApp</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={{ padding: 10, alignItems: 'center' }}
-              onPress={() => setShowMonthlyWrap(false)}
-            >
-              <Text style={{ color: C.textSecondary, fontSize: 14, fontWeight: '600', fontFamily: Typography.fontFamilyMedium }}>Close</Text>
+              <Text style={styles.briefingButtonText}>See my Dashboard</Text>
             </TouchableOpacity>
 
           </View>
         </View>
       </Modal>
+
+      <WowModal
+        visible={showWowModal}
+        onClose={() => setShowWowModal(false)}
+        transactions={transactions}
+        scores={scores}
+        recurringCharges={recurringCharges}
+        monthlyForecast={monthlyForecast}
+      />
+
+      <MonthlyWrapModal
+        visible={showMonthlyWrap}
+        onClose={() => setShowMonthlyWrap(false)}
+        scores={scores}
+        wrapData={monthlyWrapData}
+        wellnessColor={getDynamicScoreColor(scores.wellness, 'higher_is_better')}
+      />
 
       {/* Tab Bar */}
       <View style={styles.tabBar}>
@@ -1881,7 +1980,7 @@ const styles = StyleSheet.create({
 
   // AI Morning Briefing Modal
   briefingOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.96)', justifyContent: 'center', alignItems: 'center', padding: 24,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 24,
   },
   briefingCard: {
     width: '100%', backgroundColor: C.glassStrong, borderWidth: 1,
@@ -1956,4 +2055,17 @@ const styles = StyleSheet.create({
   },
   wrapStatLabel: { color: C.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.2, fontFamily: Typography.fontFamilyBold },
   wrapStatValue: { color: C.textPrimary, fontSize: 14, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+  // "Wow" Insights
+  wowInsightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 14,
+  },
+  wowIcon: { fontSize: 24, marginRight: 16 },
+  wowText: { flex: 1, color: C.textPrimary, fontSize: 15, lineHeight: 22, fontFamily: Typography.fontFamilyMedium },
 });

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, Animated, NativeModules, Modal, TouchableOpacity, FlatList } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
+import { Typography } from '../theme/typography';
 
 const { SmsModule } = NativeModules;
 
@@ -21,17 +22,19 @@ const C = {
 
 const CAT_COLORS: { [key: string]: string } = {
   Food: '#F59E0B', Groceries: '#84CC16', Shopping: '#8B5CF6', Travel: '#38BDF8',
-  Entertainment: '#EF4444', Bills: '#10B981', Health: '#F97316', Other: '#64748B', Income: '#10B981'
+  Entertainment: '#EF4444', Bills: '#10B981', Health: '#F97316', Other: '#64748B', Income: '#10B981',
+  'Personal Care': '#EC4899'
 };
 
 const CAT_ICONS: { [key: string]: string } = {
   Food: '🍔', Groceries: '🛒', Shopping: '🛍️', Travel: '✈️',
-  Entertainment: '🎬', Bills: '📄', Health: '💊', Other: '📦', Income: '💰'
+  Entertainment: '🎬', Bills: '📄', Health: '💊', Other: '📦', Income: '💰',
+  'Personal Care': '💈'
 };
 
 const DEFAULT_BUDGETS: { [key: string]: number } = {
   Food: 4000, Groceries: 3000, Shopping: 5000, Travel: 1500,
-  Entertainment: 1000, Bills: 2000, Health: 1000, Other: 2000
+  Entertainment: 1000, Bills: 2000, Health: 1000, 'Personal Care': 1500, Other: 2000
 };
 
 const STORAGE_KEY = 'budgets:v1';
@@ -52,7 +55,11 @@ export default function BudgetsScreen({ transactions }: Props) {
     (async () => {
       try {
         const raw = await SmsModule.loadData(STORAGE_KEY);
-        if (raw) setBudgets(JSON.parse(raw));
+        if (raw) {
+          const saved = JSON.parse(raw);
+          // Merge defaults with saved so new categories (like Personal Care) are added
+          setBudgets({ ...DEFAULT_BUDGETS, ...saved });
+        }
       } catch (e) {
       } finally {
         setLoaded(true);
