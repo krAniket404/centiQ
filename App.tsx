@@ -575,19 +575,23 @@ export default function App() {
       if (parsed.worthItTxnIds) setWorthItTxnIds(parsed.worthItTxnIds);
       if (parsed.goals) setGoals(parsed.goals);
       if (parsed.activeStreaks) setActiveStreaks(parsed.activeStreaks);
-      if (parsed.manualCategories) setManualCategories(parsed.manualCategories); // <-- ADD THIS
+      if (parsed.manualCategories) setManualCategories(parsed.manualCategories);
 
+      // FIX: Convert date strings back into actual Date objects!
       if (Array.isArray(parsed.transactions)) {
         const hydratedTxns = parsed.transactions.map((t: any) => ({
           ...t,
-          date: new Date(t.date)
+          date: new Date(t.date) // This is the magic line that fixes the crash
         }));
         setTransactions(hydratedTxns);
       }
 
       if (parsed.scores) setScores(parsed.scores);
       return parsed;
-    } catch (e) { return null; }
+    } catch (e) {
+      console.warn("Failed to load saved data", e);
+      return null;
+    }
   };
 
   const saveState = async (overrides: any = {}) => {
@@ -735,19 +739,11 @@ export default function App() {
 
       // TRIGGER THE FADE & SLIDE ANIMATION!
       Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 600,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 600,
-          useNativeDriver: true,
-        })
+        Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
+        Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true })
       ]).start();
 
-      // SAVE DATA TO PHONE STORAGE (Fixes the reset bug!)
+      // SAVE DATA TO PHONE STORAGE
       saveState({
         transactions: parsedTxns,
         scores: { discipline, impulse, volatility, wellness, savingsRate }
@@ -756,7 +752,7 @@ export default function App() {
     } catch (e) {
       console.error("Failed to read SMS", e);
     }
-  };
+  };w
 
   const handleRefresh = async () => {
     setIsRefreshing(true);

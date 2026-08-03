@@ -17,12 +17,13 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
 
   const upperBody = smsBody.toUpperCase();
 
-  // 1. SPAM FILTER: Reject promotional messages and internal wallet credits
+  // 1. SPAM FILTER: Reject promotional messages, wallet credits, and mandate warnings
   const spamKeywords = [
     'OFFER', 'CASHBACK', 'WIN', 'COUPON', 'DISCOUNT', 'DEAL', 'APPLY', 'PROMO',
     'CLICK HERE', 'SHOP NOW', 'SUBSCRIBE', 'DATA PACK', 'TOLL FREE',
     'WALLET', 'CASH CREDITED', 'REWARD', 'POINTS CREDITED', 'GIFT CARD', 'STORE CREDIT',
-    'JIO', 'PREPAID', 'POSTPAID', 'RECHARGE' // Added Jio/Recharge spam
+    'JIO', 'PREPAID', 'POSTPAID', 'RECHARGE',
+    'WILL BE DEBITED', 'MANDATE', 'AUTOPAY', 'AUTO PAY', 'SIP', 'EXECUTED ON' // Added mandate warnings
   ];
   if (spamKeywords.some(kw => upperBody.includes(kw))) return null;
 
@@ -52,7 +53,6 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
       let vpaName = vpaMatch[1].trim().toUpperCase();
       merchant = /^\d+$/.test(vpaName) ? 'VPA Transfer' : vpaName;
     } else {
-      // Allow periods for initials, stop at RRN, Avl Bal, numbers, etc.
       const fromRegex = /(?:from|by|via)\s+([A-Za-z\s&'\.]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn)\b|[0-9]|\.\s*(?:RRN|Avl|Not))/i;
       const fromMatch = smsBody.match(fromRegex);
       if (fromMatch && fromMatch[1]) {
@@ -66,8 +66,8 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
       let vpaName = vpaMatch[1].trim().toUpperCase();
       merchant = /^\d+$/.test(vpaName) ? 'VPA Transfer' : vpaName;
     } else {
-      // Allow periods, stop at RRN, Avl Bal, numbers, etc.
-      const toRegex = /(?:to|at|via)\s+([A-Za-z\s&'\.]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn)\b|[0-9]|\.\s*(?:RRN|Avl|Not))/i;
+      // Added "towards" to catch "towards WWW ZEE5 COM"
+      const toRegex = /(?:to|at|via|towards)\s+([A-Za-z\s&'\.0-9]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn|pause)\b|[0-9]|\.\s*(?:RRN|Avl|Not))/i;
       const toMatch = smsBody.match(toRegex);
       if (toMatch && toMatch[1]) {
         merchant = toMatch[1].trim().toUpperCase();
@@ -76,7 +76,7 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   }
 
   // Clean up trailing periods and common garbage words
-  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN)\b/g, '').trim();
+  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN|WWW|COM)\b/g, '').trim();
   merchant = merchant.replace(/\.+$/, '').trim(); // Remove trailing periods
 
   if (merchant.length < 3) merchant = 'Unknown';
