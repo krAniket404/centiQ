@@ -752,7 +752,7 @@ export default function App() {
     } catch (e) {
       console.error("Failed to read SMS", e);
     }
-  };w
+  };c
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
