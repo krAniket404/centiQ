@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
   Alert, NativeModules, FlatList, StatusBar, AppState, Modal, ActivityIndicator, ScrollView, Share, TextInput, Dimensions, RefreshControl, Vibration, Animated,
-  LayoutAnimation, UIManager, Platform
+  LayoutAnimation, UIManager, Platform, DeviceEventEmitter, Linking
 } from 'react-native';
 import { parseBankSMS, ParsedTransaction } from './src/lib/smsParser';
 import { calculateDisciplineScore, calculateImpulseIndex, calculateWellnessScore, calculateVolatilityScore, detectSubscriptionLeaks } from './src/lib/behavioralEngine';
@@ -26,6 +26,7 @@ import { Typography } from './src/theme/typography';
 import WowModal from './src/components/WowModal';
 import WellnessCard from './src/components/WellnessCard';
 import MonthlyWrapModal from './src/components/MonthlyWrapModal';
+
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -645,6 +646,18 @@ export default function App() {
     } catch (err) {}
   };
 
+  // Function to prompt user to enable Notification Access
+  const requestNotificationAccess = async () => {
+    Alert.alert(
+      "Enable Smart Tracking",
+      "To catch UPI and banking app transactions automatically, allow CentiQ to access notifications.",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Open Settings", onPress: () => NativeModules.SmsModule.openNotificationSettings() }
+      ]
+    );
+  };
+
   const fetchMorningBriefing = async () => {
     try {
       const now = new Date();
@@ -752,7 +765,7 @@ export default function App() {
     } catch (e) {
       console.error("Failed to read SMS", e);
     }
-  };c
+  };
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
@@ -927,6 +940,45 @@ export default function App() {
     setShowAddGoalModal(false);
     triggerHaptic(30); //Satisfying Click
   };
+
+  // Listen for transaction notifications from the Android Service
+  useEffect(() => {
+    const subscription = DeviceEventEmitter.addListener('transaction_notification', (notificationText: string) => {
+      console.log("Received Notification:", notificationText);
+
+      // Use your existing parser on the notification text
+      const parsedTxn = parseBankSMS(notificationText);
+
+      if (parsedTxn && parsedTxn.amount > 0) {
+        setTransactions(prev => {
+          // PREVENT DUPLICATES! Check if we already logged this in the last 2 minutes
+          const isDuplicate = prev.some(t =>
+            t.amount === parsedTxn.amount &&
+            t.merchant === parsedTxn.merchant &&
+            (Math.abs(new Date(t.date).getTime() - Date.now()) < 120000) // 2 mins
+          );
+
+          if (!isDuplicate) {
+            const newTxn = {
+              ...parsedTxn,
+              id: `${Date.now()}_${parsedTxn.amount}_${parsedTxn.merchant}_${parsedTxn.type}`,
+              date: new Date()
+            };
+            const updated = [newTxn, ...prev];
+
+            // Save to storage immediately
+            saveState({ transactions: updated });
+            // Sync to Supabase
+            syncToCloud([newTxn]);
+            return updated;
+          }
+          return prev;
+        });
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
 
   //TEMPORARILY BYPASS LOGIN TO TEST THE APP
   if (!session) {

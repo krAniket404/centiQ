@@ -1,10 +1,14 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Note: BIND_NOTIFICATION_LISTENER_SERVICE is required in the <service> tag below, 
+         but it's good practice to keep it out of <uses-permission> to avoid Play Store rejection -->
+
     <application
         android:name=".MainApplication"
         android:label="@string/app_name"
@@ -15,7 +19,7 @@
         android:usesCleartextTraffic="${usesCleartextTraffic}"
         android:supportsRtl="true">
 
-        <!-- ONLY ONE ACTIVITY TAG HERE -->
+        <!-- Main Activity -->
         <activity
             android:name=".MainActivity"
             android:label="@string/app_name"
@@ -39,6 +43,16 @@
 
         </activity>
 
+        <!-- NEW: Notification Listener Service for UPI/Banking Apps -->
+        <service
+            android:name=".QNotificationListener"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
         <!-- SMS Background Listener -->
         <receiver android:name=".SmsReceiver" android:enabled="true" android:exported="true">
             <intent-filter android:priority="999">
@@ -46,7 +60,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Notification Button Listener -->
+        <!-- Notification Action Receiver (Cleaned up duplicates) -->
         <receiver android:name=".NotificationActionReceiver" android:enabled="true" android:exported="false">
             <intent-filter>
                 <action android:name="com.centiq.ACTION_WORTH_IT" />
@@ -54,13 +68,8 @@
             </intent-filter>
         </receiver>
 
-        <receiver android:name=".NotificationActionReceiver" android:enabled="true" android:exported="false">
-            <intent-filter>
-                <action android:name="com.centiq.ACTION_WORTH_IT" />
-                <action android:name="com.centiq.ACTION_IMPULSIVE" />
-            </intent-filter>
-        </receiver>
-
+        <!-- Daily Reminder Receiver -->
         <receiver android:name=".DailyReminderReceiver" android:enabled="true" android:exported="false" />
+
     </application>
 </manifest>

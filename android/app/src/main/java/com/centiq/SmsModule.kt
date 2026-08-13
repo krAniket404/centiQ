@@ -21,6 +21,22 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
         promise.resolve(granted)
     }
 
+    override fun initialize() {
+        super.initialize()
+        ReactContextSingleton.reactContext = reactApplicationContext
+    }
+
+    @ReactMethod
+    fun openNotificationSettings() {
+        try {
+            val intent = android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            reactApplicationContext.startActivity(intent)
+        } catch (e: Exception) {
+            // Fallback just in case
+        }
+    }
+
     @ReactMethod
     fun readBankSMS(promise: Promise) {
         Thread {
