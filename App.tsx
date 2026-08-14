@@ -352,26 +352,58 @@ export default function App() {
     const now = new Date();
     const currentMonth = now.getMonth();
     const currentYear = now.getFullYear();
-    const weeks = Array.from({ length: 5 }, (_, i) => ({
-      weekNum: i + 1,
-      data: [
-        { day: 'Mon', amount: 0 }, { day: 'Tue', amount: 0 }, { day: 'Wed', amount: 0 },
-        { day: 'Thu', amount: 0 }, { day: 'Fri', amount: 0 }, { day: 'Sat', amount: 0 }, { day: 'Sun', amount: 0 }
-      ]
-    }));
+
+    // Helper function to get the Monday of any given date
+    const getMonday = (date: Date) => {
+      const d = new Date(date);
+      const day = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1); // Adjust when day is Sunday
+      d.setDate(diff);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    };
+
+    // We will group transactions by their Monday date
+    const weeksMap: { [key: string]: { day: string; amount: number }[] } = {};
+
     transactions.forEach(t => {
-      if (t.type === 'debit' && t.date.getMonth() === currentMonth && t.date.getFullYear() === currentYear) {
-        const dayOfMonth = t.date.getDate();
-        const weekIndex = Math.floor((dayOfMonth - 1) / 7);
-        if (weekIndex < 5) {
-          const dayOfWeek = t.date.getDay();
-          const mapIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-          weeks[weekIndex].data[mapIndex].amount += t.amount;
+      const txnDate = new Date(t.date);
+      // Only look at spending in the current month and year
+      if (t.type === 'debit' && txnDate.getMonth() === currentMonth && txnDate.getFullYear() === currentYear) {
+
+        // Find the Monday of the week this transaction belongs to
+        const monday = getMonday(txnDate);
+        const weekKey = monday.toISOString(); // Use Monday's date as a unique key
+
+        // If this week doesn't exist in our map yet, create it
+        if (!weeksMap[weekKey]) {
+          weeksMap[weekKey] = [
+            { day: 'Mon', amount: 0 }, { day: 'Tue', amount: 0 }, { day: 'Wed', amount: 0 },
+            { day: 'Thu', amount: 0 }, { day: 'Fri', amount: 0 }, { day: 'Sat', amount: 0 }, { day: 'Sun', amount: 0 }
+          ];
         }
+
+        // Map Sunday (0) to index 6, Monday (1) to index 0, etc.
+        const mapIndex = (txnDate.getDay() + 6) % 7;
+
+        // Add the amount to the correct day
+        weeksMap[weekKey][mapIndex].amount += Math.round(t.amount * 100) / 100;
       }
     });
-    const currentWeekIndex = Math.floor((now.getDate() - 1) / 7);
-    return weeks.filter((w, i) => w.data.some(d => d.amount > 0) || i === currentWeekIndex);
+
+    // Sort the weeks by their Monday date (oldest to newest)
+    const sortedWeekKeys = Object.keys(weeksMap).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+
+    // Get the Monday of the current week so we don't show future empty weeks
+    const currentMonday = getMonday(now);
+
+    // Convert the map into an array and filter out future weeks
+    return sortedWeekKeys
+      .filter(weekKey => new Date(weekKey) <= currentMonday)
+      .map((weekKey, index) => ({
+        weekNum: index + 1,
+        data: weeksMap[weekKey]
+      }));
   }, [transactions]);
 
   const globalMaxSpend = useMemo(() => {
@@ -383,6 +415,7 @@ export default function App() {
         });
       });
     }
+    // Ensure max is never exactly 0 to avoid division by zero errors in the chart UI
     return max > 0 ? max : 1;
   }, [monthlyWeeklyData]);
 
