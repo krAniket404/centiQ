@@ -1,96 +1,72 @@
 import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, KeyboardAvoidingView, Platform } from 'react-native';
-import { supabase } from '../lib/supabase';
-
-const C = {
-  bg: "#060608", glass: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)",
-  glassHighlight: "rgba(255,255,255,0.2)", textPrimary: "#FFFFFF", textSecondary: "#A0A0B0", accent: "#38BDF8"
-};
-
-const Typography = {
-  fontFamilyRegular: 'lato_regular',
-  fontFamilyMedium: 'lato_regular',
-  fontFamilyBold: 'lato_bold',
-};
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
+import { signIn, signUp } from '../lib/firebase';
 
 export default function AuthScreen() {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleLogin = async () => {
+  const handleAuth = async (isLogin: boolean) => {
+    if (!email || !password) {
+      Alert.alert("Error", "Please enter email and password");
+      return;
+    }
     setLoading(true);
     try {
-      // Instantly creates a real user in Supabase without email/password
-      const { error } = await supabase.auth.signInAnonymously();
-      if (error) throw error;
-      // The app will automatically detect the session and go to the Dashboard!
-    } catch (error: any) {
-      alert(error.message);
+      if (isLogin) {
+        await signIn(email, password);
+      } else {
+        await signUp(email, password);
+      }
+    } catch (e: any) {
+      Alert.alert("Authentication Error", e.message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-      {/* Background Ambient Orbs for depth */}
-      <View style={styles.orb1} />
-      <View style={styles.orb2} />
+    <View style={styles.container}>
+      <Text style={styles.title}>CentiQ</Text>
+      <Text style={styles.subtitle}>Know why you spend, not just where.</Text>
 
-      <View style={styles.content}>
-        <View style={styles.logoContainer}>
-          <Text style={styles.logo}>Centi<Text style={{ color: C.accent }}>Q</Text></Text>
-        </View>
+      <TextInput
+        style={styles.input}
+        placeholder="Email"
+        placeholderTextColor="#888"
+        value={email}
+        onChangeText={setEmail}
+        autoCapitalize="none"
+        keyboardType="email-address"
+      />
+      <TextInput
+        style={styles.input}
+        placeholder="Password"
+        placeholderTextColor="#888"
+        value={password}
+        onChangeText={setPassword}
+        secureTextEntry
+      />
 
-        <Text style={styles.title}>Understand your money habits.</Text>
-        <Text style={styles.subtext}>
-          Not just where you spend, but why. Connect your SMS to unlock your behavioral profile, train your personal AI, and stop impulsive spending.
-        </Text>
+      <TouchableOpacity style={styles.button} onPress={() => handleAuth(true)} disabled={loading}>
+        {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.buttonText}>Log In</Text>}
+      </TouchableOpacity>
 
-        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#001018" />
-          ) : (
-            <Text style={styles.buttonText}>Get Started →</Text>
-          )}
-        </TouchableOpacity>
-
-        <Text style={styles.privacyText}>
-          🔒 100% Private. Your SMS data is parsed locally on your device.
-        </Text>
-      </View>
-    </KeyboardAvoidingView>
+      <TouchableOpacity style={styles.linkButton} onPress={() => handleAuth(false)} disabled={loading}>
+        <Text style={styles.linkText}>Don't have an account? Sign Up</Text>
+      </TouchableOpacity>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: C.bg, justifyContent: 'center', paddingHorizontal: 24 },
-
-  // Ambient Orbs
-  orb1: {
-    position: 'absolute', top: -100, left: -100, width: 300, height: 300, borderRadius: 150,
-    backgroundColor: 'rgba(56,189,248,0.08)'
-  },
-  orb2: {
-    position: 'absolute', bottom: -80, right: -80, width: 250, height: 250, borderRadius: 125,
-    backgroundColor: 'rgba(139,92,246,0.06)'
-  },
-
-  content: {
-    backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderTopColor: C.glassHighlight,
-    borderRadius: 32, padding: 32,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.4, shadowRadius: 32, elevation: 12
-  },
-  logoContainer: { alignItems: 'center', marginBottom: 32 },
-  logo: { color: C.textPrimary, fontSize: 48, fontWeight: '900', letterSpacing: -1, fontFamily: Typography.fontFamilyBold },
-
-  title: { color: C.textPrimary, fontSize: 26, fontWeight: '800', marginBottom: 12, letterSpacing: -0.5, textAlign: 'center', fontFamily: Typography.fontFamilyBold },
-  subtext: { color: C.textSecondary, fontSize: 15, lineHeight: 22, marginBottom: 32, textAlign: 'center', fontFamily: Typography.fontFamilyRegular },
-
-  button: {
-    backgroundColor: C.accent, paddingVertical: 16, borderRadius: 16, alignItems: 'center',
-    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.4, shadowRadius: 12, elevation: 8
-  },
-  buttonText: { color: '#001018', fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold },
-
-  privacyText: { color: C.textSecondary, fontSize: 12, marginTop: 20, textAlign: 'center', fontFamily: Typography.fontFamilyRegular }
+  container: { flex: 1, backgroundColor: '#060608', justifyContent: 'center', alignItems: 'center', padding: 20 },
+  title: { fontSize: 42, fontWeight: '800', color: '#38BDF8', marginBottom: 8 },
+  subtitle: { fontSize: 16, color: '#A0A0B0', marginBottom: 40 },
+  input: { width: '100%', height: 50, backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, paddingHorizontal: 16, color: '#FFF', marginBottom: 16, borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' },
+  button: { width: '100%', height: 50, backgroundColor: '#38BDF8', borderRadius: 12, justifyContent: 'center', alignItems: 'center', marginBottom: 16 },
+  buttonText: { color: '#000', fontWeight: '700', fontSize: 16 },
+  linkButton: { padding: 10 },
+  linkText: { color: '#A0A0B0', fontSize: 14 }
 });

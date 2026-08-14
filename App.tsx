@@ -14,9 +14,9 @@ import AICoachScreen from './src/screens/AICoachScreen';
 import SettingsScreen from './src/screens/SettingsScreen';
 import CircularScoreCard from './src/components/CircularScoreCard';
 import PremiumChart from './src/components/PremiumChart';
-import { supabase } from './src/lib/supabase';
+import auth, { FirebaseAuthTypes } from '@react-native-firebase/auth';
+import firestore from '@react-native-firebase/firestore';
 import AuthScreen from './src/screens/AuthScreen';
-import { Session } from '@supabase/supabase-js';
 import { getScoreColor as getDynamicScoreColor } from './src/theme/scoreColor';
 import PaywallScreen from './src/screens/PaywallScreen';
 import AnimatedNumber from './src/components/AnimatedNumber';
@@ -26,7 +26,6 @@ import { Typography } from './src/theme/typography';
 import WowModal from './src/components/WowModal';
 import WellnessCard from './src/components/WellnessCard';
 import MonthlyWrapModal from './src/components/MonthlyWrapModal';
-
 
 const { SmsModule } = NativeModules;
 const STORAGE_KEY = 'centiq_state_v1';
@@ -112,7 +111,7 @@ export default function App() {
   const [labeledTxnIds, setLabeledTxnIds] = useState<string[]>([]);
 
   const savedStateRef = useRef<any>(null);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<FirebaseAuthTypes.User | null>(null);
 
   // Animation values for the meters
   const meterAnimations = React.useRef([
@@ -174,41 +173,33 @@ export default function App() {
     });
   }, [scores]);
 
-  useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      if (session?.user) {
-        // Fetch Pro Status
-        supabase
-          .from('profiles')
-          .select('subscription_status, trial_end_date')
-          .eq('id', session.user.id)
-          .single()
-          .then(({ data }) => {
-            if (data?.subscription_status === 'trialing' || data?.subscription_status === 'active') {
-              // Check if trial expired
-              if (data.subscription_status === 'trialing' && data.trial_end_date && new Date(data.trial_end_date) < new Date()) {
-                setIsPro(false); // Trial expired
-              } else {
-                setIsPro(true);
-              }
+/*  useEffect(() => {
+    // Safety check to prevent the crash
+    if (!auth || typeof auth !== 'function') {
+      console.error("Firebase Auth module is not linked properly!");
+      return;
+    }
+
+    const unsubscribe = auth().onAuthStateChanged(async (user) => {
+      setSession(user);
+      if (user) {
+        // Fetch Pro Status from Firestore
+        const doc = await firestore().collection('profiles').doc(user.uid).get();
+        if (doc.exists) {
+          const data = doc.data();
+          if (data?.subscription_status === 'trialing' || data?.subscription_status === 'active') {
+            if (data.subscription_status === 'trialing' && data.trial_end_date && new Date(data.trial_end_date) < new Date()) {
+              setIsPro(false);
+            } else {
+              setIsPro(true);
             }
-          });
+          }
+        }
       }
     });
-    supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-    });
-  }, []);
 
-  useEffect(() => {
-    const init = async () => {
-      const saved = await loadSavedData();
-      savedStateRef.current = saved;
-      await checkPermission(saved);
-    };
-    init();
-  }, []);
+    return () => unsubscribe();
+  }, []); */
 
   // Check for notification button clicks when app opens
   useEffect(() => {
@@ -578,11 +569,10 @@ export default function App() {
       if (parsed.activeStreaks) setActiveStreaks(parsed.activeStreaks);
       if (parsed.manualCategories) setManualCategories(parsed.manualCategories);
 
-      // FIX: Convert date strings back into actual Date objects!
       if (Array.isArray(parsed.transactions)) {
         const hydratedTxns = parsed.transactions.map((t: any) => ({
           ...t,
-          date: new Date(t.date) // This is the magic line that fixes the crash
+          date: new Date(t.date)
         }));
         setTransactions(hydratedTxns);
       }
@@ -605,7 +595,7 @@ export default function App() {
       transactions: overrides.transactions ?? transactions,
       scores: overrides.scores ?? scores,
       activeStreaks: overrides.activeStreaks ?? activeStreaks,
-      manualCategories: overrides.manualCategories ?? manualCategories, // <-- ADD THIS
+      manualCategories: overrides.manualCategories ?? manualCategories,
     };
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
@@ -626,7 +616,6 @@ export default function App() {
 
   const requestPermission = async () => {
     try {
-      // Ask for SMS, RECEIVE_SMS, and POST_NOTIFICATIONS permissions
       const granted = await PermissionsAndroid.requestMultiple([
         PermissionsAndroid.PERMISSIONS.READ_SMS,
         PermissionsAndroid.PERMISSIONS.RECEIVE_SMS,
@@ -696,7 +685,6 @@ export default function App() {
       setMorningQuote(randomQuote);
 
     } catch (e) {
-      // ... existing catch logic ...
       setMorningBriefing("Good morning! Ready to make some smart financial moves today?");
     } finally {
       setIsFetchingBriefing(false);
@@ -708,7 +696,6 @@ export default function App() {
       const rawSmsList = await SmsModule.readBankSMS();
       const parsedTxns = backfillHistory(rawSmsList);
       parsedTxns.forEach((txn) => { txn.id = `${txn.date.getTime()}_${txn.amount}_${txn.merchant}_${txn.type}`; });
-      // Trigger the animation BEFORE the transactions update!
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       setTransactions(parsedTxns);      syncToCloud(parsedTxns);
 
@@ -727,10 +714,7 @@ export default function App() {
       const monthlyCredit = parsedTxns.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
       const savingsRate = monthlyCredit > 0 ? Math.max(0, Math.min(100, ((monthlyCredit - monthlyDebit) / monthlyCredit) * 100)) : 0;
 
-      // Trigger a smooth animation for any UI changes!
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-
-      // Keep the animation here too!
       LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
       const wellness = calculateWellnessScore(discipline, impulse, volatility);
       setScores({ discipline, impulse, volatility, wellness, savingsRate });
@@ -750,13 +734,11 @@ export default function App() {
         model.train(pseudoLabels); setUserLabels(pseudoLabels); saveState({ userLabels: pseudoLabels });
       }
 
-      // TRIGGER THE FADE & SLIDE ANIMATION!
       Animated.parallel([
         Animated.timing(fadeAnim, { toValue: 1, duration: 600, useNativeDriver: true }),
         Animated.timing(slideAnim, { toValue: 0, duration: 600, useNativeDriver: true })
       ]).start();
 
-      // SAVE DATA TO PHONE STORAGE
       saveState({
         transactions: parsedTxns,
         scores: { discipline, impulse, volatility, wellness, savingsRate }
@@ -769,11 +751,8 @@ export default function App() {
 
   const handleRefresh = async () => {
     setIsRefreshing(true);
-
-    // Reset animation to invisible
     fadeAnim.setValue(0);
     slideAnim.setValue(30);
-
     await fetchSMS(savedStateRef.current);
     setIsRefreshing(false);
   };
@@ -785,13 +764,11 @@ export default function App() {
     const updatedLabeledIds = [...labeledTxnIds, txn.id!];
     const updatedWorthIt = isImpulsive ? worthItTxnIds.filter(id => id !== txn.id!) : [...worthItTxnIds, txn.id!];
 
-    // ADD THIS LINE to animate the card expanding and the meters updating!
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
 
     setUserLabels(updatedLabels);
     setLabeledTxnIds(updatedLabeledIds);
     setWorthItTxnIds(updatedWorthIt);
-    // ... rest of the function
     model.train(updatedLabels);
 
     const debitTxns = transactions.filter(t => t.type === 'debit');
@@ -806,29 +783,30 @@ export default function App() {
     const updated = { ...manualCategories, [txnId]: newCategory };
     setManualCategories(updated);
     saveState({ manualCategories: updated });
-
-    // Update the transactions array instantly so the UI refreshes
     setTransactions(prev => prev.map(t => t.id === txnId ? { ...t, category: newCategory } : t));
   };
 
   const syncToCloud = async (txns: ParsedTransaction[]) => {
-    const userId = session?.user?.id || '00000000-0000-0000-0000-000000000000';
-    const payload = txns.map(t => ({
-      user_id: userId,
-      amount: t.amount,
-      merchant: t.merchant,
-      category: t.category,
-      txn_date: t.date.toISOString(),
-      type: t.type
-    }));
+    // Use the fake test user ID for now, or the real Firebase UID later
+    const userId = session?.uid || 'test-user-123';
 
     try {
-      const { error } = await supabase
-        .from('transactions')
-        .upsert(payload, { onConflict: 'user_id, txn_date, amount, merchant' });
+      const batch = firestore().batch();
 
-      if (error) console.warn('Cloud sync error:', error.message);
-      else console.log('☁️ Synced transactions to Supabase!');
+      txns.forEach(t => {
+        const docRef = firestore().collection('transactions').doc(`${userId}_${t.date.getTime()}_${t.amount}_${t.merchant}`);
+        batch.set(docRef, {
+          user_id: userId,
+          amount: t.amount,
+          merchant: t.merchant,
+          category: t.category,
+          txn_date: t.date.toISOString(),
+          type: t.type
+        }, { merge: true }); // merge: true prevents duplicates!
+      });
+
+      await batch.commit();
+      console.log('☁️ Synced transactions to Firebase!');
     } catch (e) {
       console.warn('Failed to sync to cloud', e);
     }
@@ -856,7 +834,6 @@ export default function App() {
       setIsSubscribing(false);
     }
   };
-
   const handleDepositFunds = () => {
     if (!depositAmount || !depositGoalId) return;
 
@@ -877,6 +854,7 @@ export default function App() {
   // Load pending purchases on mount
   useEffect(() => {
     const loadPending = async () => {
+      // FIXED: Added SmsModule.
       const raw = await SmsModule.loadData('pending_purchases');
       if (raw) setPendingPurchases(JSON.parse(raw));
     };
@@ -893,6 +871,7 @@ export default function App() {
     };
     const updated = [newPurchase, ...pendingPurchases];
     setPendingPurchases(updated);
+    // FIXED: Added SmsModule.
     await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
     setPauseName('');
     setPauseAmount('');
@@ -908,6 +887,7 @@ export default function App() {
     }
     const updated = pendingPurchases.filter(p => p.id !== id);
     setPendingPurchases(updated);
+    // FIXED: Added SmsModule.
     await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
   };
 
@@ -933,12 +913,11 @@ export default function App() {
     setGoals(updatedGoals);
     saveState({ goals: updatedGoals });
 
-    // Reset inputs and close modal
     setNewGoalName('');
     setNewGoalTarget('');
     setNewGoalCurrent('');
     setShowAddGoalModal(false);
-    triggerHaptic(30); //Satisfying Click
+    triggerHaptic(30); //Satisfying click!
   };
 
   // Listen for transaction notifications from the Android Service
@@ -982,7 +961,8 @@ export default function App() {
 
   //TEMPORARILY BYPASS LOGIN TO TEST THE APP
   if (!session) {
-      return <AuthScreen />;
+      // return <AuthScreen />;
+      setSession({ uid: 'test-user-123' } as any); // Fake a login so you can get into the app!
   }
 
   if (!hasPermission) {
@@ -2122,3 +2102,5 @@ const styles = StyleSheet.create({
   wowIcon: { fontSize: 24, marginRight: 16 },
   wowText: { flex: 1, color: C.textPrimary, fontSize: 15, lineHeight: 22, fontFamily: Typography.fontFamilyMedium },
 });
+
+export default App;
