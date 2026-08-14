@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
 import { signIn, signUp } from '../lib/firebase';
+import Logo from '../assets/logo.svg';
 
 export default function AuthScreen() {
   const [email, setEmail] = useState('');
@@ -28,7 +29,7 @@ export default function AuthScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>CentiQ</Text>
+      <Logo width={80} height={80} />
       <Text style={styles.subtitle}>Know why you spend, not just where.</Text>
 
       <TextInput
