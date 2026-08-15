@@ -17,19 +17,29 @@ class DailyReminderReceiver : BroadcastReceiver() {
             val channel = android.app.NotificationChannel(
                 channelId,
                 "CentiQ Daily Reminders",
-                android.app.NotificationManager.IMPORTANCE_DEFAULT
-            )
+                android.app.NotificationManager.IMPORTANCE_HIGH // Changed to HIGH so it pops down
+            ).apply {
+                description = "Daily behavioral check-ins and streak warnings"
+                enableVibration(true)
+                vibrationPattern = longArrayOf(0, 100, 50, 100) // Premium double vibration
+            }
             val notificationManager: android.app.NotificationManager =
                 context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
             notificationManager.createNotificationChannel(channel)
         }
 
         val builder = NotificationCompat.Builder(context, channelId)
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            // Uses a much nicer built-in bell/alarm icon instead of the ugly warning sign
+            .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            // Adds your CentiQ blue accent color to the icon and app name
+            .setColor(0xFF38BDF8.toInt())
+            .setColorized(true)
+            // Makes it slide down from the top of the screen
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_REMINDER)
             .setAutoCancel(true)
 
         try {
