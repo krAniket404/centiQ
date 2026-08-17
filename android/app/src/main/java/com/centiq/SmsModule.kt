@@ -125,7 +125,7 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun saveData(key: String, value: String, promise: Promise) {
         try {
-            val prefs = reactApplicationContext.getSharedPreferences("CentiQStorage", Context.MODE_PRIVATE)
+            val prefs = reactApplicationContext.getSharedPreferences("QStorage", Context.MODE_PRIVATE)
             prefs.edit().putString(key, value).apply()
             promise.resolve(true)
         } catch (e: Exception) {
@@ -136,7 +136,7 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun loadData(key: String, promise: Promise) {
         try {
-            val prefs = reactApplicationContext.getSharedPreferences("CentiQStorage", Context.MODE_PRIVATE)
+            val prefs = reactApplicationContext.getSharedPreferences("QStorage", Context.MODE_PRIVATE)
             val value = prefs.getString(key, null)
             promise.resolve(value) // resolves to null (not an error) if nothing was saved yet
         } catch (e: Exception) {

@@ -15,9 +15,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-               BuildableName = "CentiQ.app"
-               BlueprintName = "CentiQ"
-               ReferencedContainer = "container:CentiQ.xcodeproj">
+               BuildableName = "Q.app"
+               BlueprintName = "Q"
+               ReferencedContainer = "container:Q.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "00E356ED1AD99517003FC87E"
-               BuildableName = "CentiQTests.xctest"
-               BlueprintName = "CentiQTests"
-               ReferencedContainer = "container:CentiQ.xcodeproj">
+               BuildableName = "QTests.xctest"
+               BlueprintName = "QTests"
+               ReferencedContainer = "container:Q.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -55,9 +55,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "CentiQ.app"
-            BlueprintName = "CentiQ"
-            ReferencedContainer = "container:CentiQ.xcodeproj">
+            BuildableName = "Q.app"
+            BlueprintName = "Q"
+            ReferencedContainer = "container:Q.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </LaunchAction>
@@ -72,9 +72,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "13B07F861A680F5B00A75B9A"
-            BuildableName = "CentiQ.app"
-            BlueprintName = "CentiQ"
-            ReferencedContainer = "container:CentiQ.xcodeproj">
+            BuildableName = "Q.app"
+            BlueprintName = "Q"
+            ReferencedContainer = "container:Q.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

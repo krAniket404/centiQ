@@ -33,7 +33,7 @@ class SmsReceiver : BroadcastReceiver() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
                 channelId,
-                "CentiQ Transactions",
+                "Q Transactions",
                 android.app.NotificationManager.IMPORTANCE_HIGH
             ).apply {
                 description = "Notifications for new transactions"

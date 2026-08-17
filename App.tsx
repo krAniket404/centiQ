@@ -1,3 +1,4 @@
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   StyleSheet, Text, View, TouchableOpacity, PermissionsAndroid, BackHandler,
@@ -141,14 +142,14 @@ export default function App() {
         ? `You have ₹${dailyAllowance.toLocaleString('en-IN')} left to spend today to stay on track.`
         : `You are over budget. Try to minimize spending today.`;
 
-      SmsModule.scheduleDailyReminder(8, 0, "CentiQ Daily Check-in", morningMsg)
+      SmsModule.scheduleDailyReminder(8, 0, "cQ Daily Check-in", morningMsg)
         .catch((e: any) => console.warn("Failed to schedule morning reminder", e));
 
       // 2. 9:00 PM - Streak Warning (Only if they have an active streak)
       if (activeStreaks && activeStreaks.length > 0) {
         const maxStreak = Math.max(...Object.values(streakData).map(Number));
         if (maxStreak > 0) {
-          const nightMsg = `Don't break your 🔥 ${maxStreak}-day streak! No late-night spending.`;
+          const nightMsg = `Don't break your ${maxStreak}-day streak! No late-night spending.`;
           SmsModule.scheduleDailyReminder(21, 0, "Streak Warning", nightMsg)
             .catch((e: any) => console.warn("Failed to schedule night reminder", e));
         }
@@ -438,17 +439,17 @@ export default function App() {
     debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
     const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
 
-    let persona = { name: 'The Balanced Spender', desc: 'You have a healthy mix of discipline and spontaneity.', icon: '⚖️', color: C.accent };
+    let persona = { name: 'The Balanced Spender', desc: 'You have a healthy mix of discipline and spontaneity.', icon: 'scale-balance', color: C.accent };
     if (scores.impulse > 60 && scores.volatility > 60) {
-      persona = { name: 'The Midnight Impulser', desc: 'High volatility and late-night triggers. You act fast and feel it later.', icon: '⚡', color: C.danger };
+      persona = { name: 'The Midnight Impulser', desc: 'High volatility and late-night triggers. You act fast and feel it later.', icon: 'flash-alert', color: C.danger };
     } else if (scores.discipline > 70 && scores.savingsRate > 50) {
-      persona = { name: 'The Stealth Saver', desc: 'Highly disciplined. You crush your savings goals without thinking twice.', icon: '🛡️', color: C.success };
+      persona = { name: 'The Stealth Saver', desc: 'Highly disciplined. You crush your savings goals without thinking twice.', icon: 'shield-check', color: C.success };
     } else if (recurringCharges.knownSubscriptions.length >= 4) {
-      persona = { name: 'The Subscription Hoarder', desc: 'You have 4+ active recurring subscriptions. Time to audit and cancel the unused ones!', icon: '📦', color: C.purple };
+      persona = { name: 'The Subscription Hoarder', desc: 'You have 4+ active recurring subscriptions. Time to audit and cancel the unused ones!', icon: 'package-variant-closed', color: C.purple };
     } else if (topCat === 'Food' && scores.impulse > 50) {
-      persona = { name: 'The Foodie Impulser', desc: 'Food is your top category, and your impulse score is high. Those late-night deliveries add up!', icon: '🍔', color: C.warning };
+      persona = { name: 'The Foodie Impulser', desc: 'Food is your top category, and your impulse score is high. Those late-night deliveries add up!', icon: 'food-apple-outline', color: C.warning };
     } else if (scores.impulse > 40 && scores.discipline < 50) {
-      persona = { name: 'The Weekend Warrior', desc: 'You stay disciplined during the week, but cut loose on the weekends.', icon: '🎉', color: C.warning };
+      persona = { name: 'The Weekend Warrior', desc: 'You stay disciplined during the week, but cut loose on the weekends.', icon: 'party-popper', color: C.warning };
     }
 
     const days: { date: Date; amount: number; isImpulsive: boolean }[] = [];
@@ -492,22 +493,22 @@ export default function App() {
     const weekendSpend = weekendTxns.reduce((a, b) => a + b.amount, 0);
     const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
     if (totalSpend > 0 && weekendSpend / totalSpend > 0.4) {
-      insights.push({ icon: '📅', title: 'WEEKEND WARRIOR', text: `You spend ${Math.round((weekendSpend / totalSpend) * 100)}% of your money on weekends. Watch out for impulse food delivery!`, color: C.warning });
+      insights.push({ icon: 'calendar-star', title: 'WEEKEND WARRIOR', text: `You spend ${Math.round((weekendSpend / totalSpend) * 100)}% of your money on weekends. Watch out for impulse food delivery!`, color: C.warning });
     }
     const lateNightTxns = debitTxns.filter(t => t.date.getHours() >= 22 || t.date.getHours() <= 4);
     if (lateNightTxns.length > 2) {
-      insights.push({ icon: '🌙', title: 'LATE NIGHT CRAVINGS', text: `We detected ${lateNightTxns.length} transactions between 10 PM and 4 AM. These are highly likely to be impulsive.`, color: C.purple });
+      insights.push({ icon: 'weather-night', title: 'LATE NIGHT CRAVINGS', text: `We detected ${lateNightTxns.length} transactions between 10 PM and 4 AM. These are highly likely to be impulsive.`, color: C.purple });
     }
     const catTotals: { [key: string]: number } = {};
     debitTxns.forEach(t => { catTotals[t.category || 'Other'] = (catTotals[t.category || 'Other'] || 0) + t.amount; });
     const topCat = Object.keys(catTotals).sort((a, b) => catTotals[b] - catTotals[a])[0];
     if (topCat && catTotals[topCat] > 0) {
-      insights.push({ icon: '🏷️', title: 'TOP CATEGORY', text: `${topCat} is your highest spending category at ₹${Math.round(catTotals[topCat]).toLocaleString('en-IN')}. Consider setting a budget for this.`, color: C.accent });
+      insights.push({ icon: 'tag-arrow-up', title: 'TOP CATEGORY', text: `${topCat} is your highest spending category at ₹${Math.round(catTotals[topCat]).toLocaleString('en-IN')}. Consider setting a budget for this.`, color: C.accent });
     }
     const avgAmt = debitTxns.length > 0 ? totalSpend / debitTxns.length : 0;
     const highValueTxns = debitTxns.filter(t => t.amount > avgAmt * 3);
     if (highValueTxns.length > 0) {
-      insights.push({ icon: '⚠️', title: 'UNUSUAL SPENDING', text: `You made ${highValueTxns.length} transactions significantly larger than your average of ₹${Math.round(avgAmt)}.`, color: C.danger });
+      insights.push({ icon: 'alert-circle-outline', title: 'UNUSUAL SPENDING', text: `You made ${highValueTxns.length} transactions significantly larger than your average of ₹${Math.round(avgAmt)}.`, color: C.danger });
     }
     return insights;
   }, [transactions]);
@@ -566,7 +567,7 @@ export default function App() {
   // Calculate Monthly Wrap Data (Fixed to exclude "Worth It" purchases)
   const monthlyWrapData = useMemo(() => {
     if (!Array.isArray(transactions) || transactions.length === 0 || !behavioralProfile) {
-      return { totalSpend: 0, topCat: 'N/A', biggestImpulse: undefined, persona: { name: 'Loading...', desc: '', icon: '⏳', color: C.accent } };
+      return { totalSpend: 0, topCat: 'N/A', biggestImpulse: undefined, persona: { name: 'Loading...', desc: '', icon: 'progress-clock', color: C.accent } };
     }
     const now = new Date();
     const debitTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear());
@@ -662,7 +663,7 @@ export default function App() {
         setHasPermission(true);
         fetchSMS(savedStateRef.current);
       } else {
-        Alert.alert("Permission Denied", "CentiQ cannot function without SMS access. Exiting.");
+        Alert.alert("Permission Denied", "Q cannot function without SMS access. Exiting.");
         setTimeout(() => BackHandler.exitApp(), 1500);
       }
     } catch (err) {}
@@ -672,7 +673,7 @@ export default function App() {
   const requestNotificationAccess = async () => {
     Alert.alert(
       "Enable Smart Tracking",
-      "To catch UPI and banking app transactions automatically, allow CentiQ to access notifications.",
+      "To catch UPI and banking app transactions automatically, allow Q to access notifications.",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Open Settings", onPress: () => NativeModules.SmsModule.openNotificationSettings() }
@@ -739,7 +740,7 @@ export default function App() {
       const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!));
 
       const discipline = calculateDisciplineScore(debitTxns);
-      const impulse = calculateImpulseIndex(liberalTxns);
+      const impulse = calculateImpulseIndex(liberalTxns, monthlyCredit);
       const volatility = calculateVolatilityScore(debitTxns);
 
       const now = new Date();
@@ -860,7 +861,7 @@ export default function App() {
         });
 
       setIsPro(true);
-      Alert.alert("Pro Unlocked! 🎉", "Your 7-day free trial has started. Enjoy CentiQ Pro!");
+      Alert.alert("Pro Unlocked! 🎉", "Your 7-day free trial has started. Enjoy Q Pro!");
     } catch (e) {
       Alert.alert("Error", "Failed to start trial.");
     } finally {
@@ -1003,7 +1004,7 @@ export default function App() {
       <View style={styles.darkContainer}>
       <StatusBar barStyle="light-content" />
         <View style={styles.onboardingContent}>
-          <Text style={styles.logo}>CentiQ</Text>
+          <Text style={styles.logo}>Q</Text>
           <Text style={styles.onboardingTitle}>Understand your money habits.</Text>
           <Text style={styles.onboardingSubtext}>Not just where you spend, but why. Connect your SMS to unlock your behavioral profile.</Text>
         </View>
@@ -1020,7 +1021,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
         <View style={styles.onboardingContent}>
           <Text style={styles.logo}>Choose your style</Text>
-          <Text style={styles.onboardingSubtext}>How do you want CentiQ to analyze your spending?</Text>
+          <Text style={styles.onboardingSubtext}>How do you want Q to analyze your spending?</Text>
           <TouchableOpacity style={[styles.modeCard, { borderColor: 'rgba(239,68,68,0.4)' }]} activeOpacity={0.85} onPress={() => { setMode('strict'); saveState({ mode: 'strict' }); }}>
             <Text style={styles.modeTitle}>Strict Mode</Text>
             <Text style={styles.modeText}>Judges spending against standard population benchmarks. No excuses, pure math.</Text>
@@ -1049,7 +1050,7 @@ return (
         <FlatList
           data={[]}
           renderItem={null}
-          contentContainerStyle={{ paddingBottom: 110 }}
+          contentContainerStyle={{ paddingBottom: 40 }}
           refreshControl={
             <RefreshControl
               refreshing={isRefreshing}
@@ -1079,10 +1080,14 @@ return (
                     })()}
                   </Text>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                  {/* Wrap Button */}
                   <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowMonthlyWrap(true)}>
+                    <Icon name="gift-outline" size={16} color={C.textPrimary} />
                     <Text style={styles.wrapButtonText}>Wrap</Text>
                   </TouchableOpacity>
+
+                  {/* Reset Button */}
                   <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
                     <View style={styles.syncDot} />
                     <Text style={styles.syncText}>Reset</Text>
@@ -1103,7 +1108,7 @@ return (
                     shadowColor: behavioralProfile.persona.color,
                   },
                 ]}>
-                  <Text style={{ fontSize: 28 }}>{behavioralProfile.persona.icon}</Text>
+                  <Icon name={behavioralProfile.persona.icon} size={28} color={behavioralProfile.persona.color} />
                 </View>
                 <View style={{ flex: 1, marginLeft: 16 }}>
                   <Text style={styles.personaLabel}>YOUR FINANCIAL PERSONA</Text>
@@ -1918,7 +1923,7 @@ return (
 }
 
 const styles = StyleSheet.create({
-  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 60 },
+  darkContainer: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 20, paddingTop: 50 },
   onboardingContent: { flex: 1, justifyContent: 'center' },
   logo: { color: C.textPrimary, fontSize: 36, fontWeight: '900', marginBottom: 20, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
   onboardingTitle: { color: C.textPrimary, fontSize: 30, fontWeight: '800', marginBottom: 12, lineHeight: 36, letterSpacing: -0.5, fontFamily: Typography.fontFamilyBold },
@@ -1949,14 +1954,20 @@ const styles = StyleSheet.create({
 
   // Glass Cards -- Real depth via shadow, plus a lighter top border
   glassCard: {
-    backgroundColor: C.glass, borderColor: C.border, borderTopColor: C.glassHighlight,
-    borderWidth: 1, borderRadius: 28, // Softer, larger radius
-    shadowColor: C.shadow, shadowOffset: { width: 0, height: 12 }, shadowOpacity: 0.3, shadowRadius: 24, elevation: 6,
+    backgroundColor: C.glass,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: C.border,
+    marginBottom: 16, // <--- Reduced to 16
+    padding: 18,      // <--- Reduced to 18
   },
   glassCardHeavy: {
-    backgroundColor: C.glassStrong, borderColor: C.border, borderTopColor: C.glassHighlight,
-    borderWidth: 1, borderRadius: 32, // Even softer for hero cards
-    shadowColor: C.shadow, shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.4, shadowRadius: 32, elevation: 8,
+    backgroundColor: C.card,
+    borderRadius: 26,
+    borderWidth: 1,
+    borderColor: C.borderStrong,
+    marginBottom: 16, // <--- Reduced to 16
+    padding: 20,      // <--- Reduced to 20
   },
   cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '800', letterSpacing: 1.8, marginBottom: 18, fontFamily: Typography.fontFamilyBold },
   cardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
@@ -2131,6 +2142,22 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     padding: 16,
     marginBottom: 14,
+  },
+  wrapButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderRadius: 980,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  wrapButtonText: {
+    color: C.textPrimary,
+    fontSize: 12.5,
+    fontWeight: '600',
   },
   wowIcon: { fontSize: 24, marginRight: 16 },
   wowText: { flex: 1, color: C.textPrimary, fontSize: 15, lineHeight: 22, fontFamily: Typography.fontFamilyMedium },

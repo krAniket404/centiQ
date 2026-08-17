@@ -8,7 +8,7 @@ import androidx.core.app.NotificationManagerCompat
 
 class DailyReminderReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val title = intent.getStringExtra("title") ?: "CentiQ Reminder"
+        val title = intent.getStringExtra("title") ?: "Q Reminder"
         val message = intent.getStringExtra("message") ?: "Check your spending today."
 
         val channelId = "centiq_reminders"
@@ -16,7 +16,7 @@ class DailyReminderReceiver : BroadcastReceiver() {
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
                 channelId,
-                "CentiQ Daily Reminders",
+                "Q Daily Reminders",
                 android.app.NotificationManager.IMPORTANCE_HIGH // Changed to HIGH so it pops down
             ).apply {
                 description = "Daily behavioral check-ins and streak warnings"
@@ -34,7 +34,7 @@ class DailyReminderReceiver : BroadcastReceiver() {
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            // Adds your CentiQ blue accent color to the icon and app name
+            // Adds your Q blue accent color to the icon and app name
             .setColor(0xFF38BDF8.toInt())
             .setColorized(true)
             // Makes it slide down from the top of the screen

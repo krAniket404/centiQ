@@ -61,16 +61,18 @@ export function calculateDisciplineScore(transactions: ParsedTransaction[]): num
   return mapCVtoScore(blendedCV);
 }
 
-export function calculateImpulseIndex(transactions: ParsedTransaction[]): number {
+export function calculateImpulseIndex(transactions: ParsedTransaction[], monthlyIncome: number = 0): number {
   const discretionary = transactions.filter(t => t.type === 'debit');
   if (discretionary.length === 0) return 0;
 
+  // 1. Late-Night Rule (40% weight)
   const lateNight = discretionary.filter(t => {
     const hour = t.date.getHours();
     return hour >= 22 || hour <= 6;
   }).length;
   const lateNightRatio = lateNight / discretionary.length;
 
+  // 2. Velocity/Cluster Rule (30% weight)
   const dayMap: { [key: string]: number } = {};
   discretionary.forEach(t => {
     const dayKey = t.date.toDateString();
@@ -80,7 +82,17 @@ export function calculateImpulseIndex(transactions: ParsedTransaction[]): number
   const totalDays = Object.keys(dayMap).length;
   const sameDayClusterRatio = totalDays > 0 ? clusterDays / totalDays : 0;
 
-  return Math.round((lateNightRatio * 0.6 + sameDayClusterRatio * 0.4) * 100);
+  // 3. NEW: Affordability Rule (30% weight)
+  let highValueRatio = 0;
+  if (monthlyIncome > 0) {
+    // If they spend more than 15% of their monthly income on a single transaction, it's an anomaly
+    const threshold = monthlyIncome * 0.15;
+    const highValueTxns = discretionary.filter(t => t.amount > threshold).length;
+    highValueRatio = highValueTxns / discretionary.length;
+  }
+
+  // Weighted calculation
+  return Math.round((lateNightRatio * 0.4 + sameDayClusterRatio * 0.3 + highValueRatio * 0.3) * 100);
 }
 
 export function calculateVolatilityScore(transactions: ParsedTransaction[]): number {
