@@ -23,21 +23,25 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
     'CLICK HERE', 'SHOP NOW', 'SUBSCRIBE', 'DATA PACK', 'TOLL FREE',
     'WALLET', 'CASH CREDITED', 'REWARD', 'POINTS CREDITED', 'GIFT CARD', 'STORE CREDIT',
     'JIO', 'PREPAID', 'POSTPAID', 'RECHARGE',
-    'WILL BE DEBITED', 'MANDATE', 'AUTOPAY', 'AUTO PAY', 'SIP', 'EXECUTED ON' // Added mandate warnings
+    'WILL BE DEBITED', 'MANDATE', 'AUTOPAY', 'AUTO PAY', 'SIP', 'EXECUTED ON'
   ];
   if (spamKeywords.some(kw => upperBody.includes(kw))) return null;
 
-  // 2. Determine Transaction Type
-  const creditKeywords = ['CREDITED', 'RECEIVED', 'REFUND', 'ADDED', 'DEPOSITED', 'REVERSAL'];
-  const debitKeywords = ['DEBITED', 'SPENT', 'PAID', 'PURCHASE', 'WITHDRAWN', 'SENT', 'DEDUCTED'];
+  // 2. Determine Transaction Type (Added Dr. and Cr. for PSU banks like Canara/SBI)
+  const creditKeywords = ['CREDITED', 'RECEIVED', 'REFUND', 'ADDED', 'DEPOSITED', 'REVERSAL', 'CR.', 'CR '];
+  const debitKeywords = ['DEBITED', 'SPENT', 'PAID', 'PURCHASE', 'WITHDRAWN', 'SENT', 'DEDUCTED', 'DR.', 'DR '];
 
   if (creditKeywords.some(kw => upperBody.includes(kw))) type = 'credit';
   else if (debitKeywords.some(kw => upperBody.includes(kw))) type = 'debit';
   else return null;
 
-  // 3. Extract Amount
+  // 3. PRE-CLEAN: Remove the "Balance" part of the SMS so we don't accidentally grab the balance amount!
+  // This splits the SMS at "Bal" or "Avl Bal" and only looks at the first half.
+  const cleanBody = smsBody.split(/Avl Bal|Bal INR|Avl bal|Balance INR|Bal Rs/i)[0];
+
+  // 4. Extract Amount
   const amountRegex = /(?:Rs\.?|INR|₹)\s?([\d,]+\.?\d*)/i;
-  const match = smsBody.match(amountRegex);
+  const match = cleanBody.match(amountRegex);
   if (match && match[1]) {
     amount = parseFloat(match[1].replace(/,/g, ''));
     if (amount <= 0) return null;
@@ -45,49 +49,51 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
     return null;
   }
 
-  // 4. Extract Merchant / Person Name
+  // 5. Extract Merchant / Person Name
   if (type === 'credit') {
     const vpaRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
-    const vpaMatch = smsBody.match(vpaRegex);
+    const vpaMatch = cleanBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       let vpaName = vpaMatch[1].trim().toUpperCase();
       merchant = /^\d+$/.test(vpaName) ? 'VPA Transfer' : vpaName;
     } else {
-      const fromRegex = /(?:from|by|via)\s+([A-Za-z\s&'\.]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn)\b|[0-9]|\.\s*(?:RRN|Avl|Not))/i;
-      const fromMatch = smsBody.match(fromRegex);
+      // Added ; and : to stop characters so it doesn't grab the UPI ID
+      const fromRegex = /(?:from|by|via)\s+([A-Za-z\s&'\.]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn)\b|[0-9]|\.\s*(?:RRN|Avl|Not)|;|:)/i;
+      const fromMatch = cleanBody.match(fromRegex);
       if (fromMatch && fromMatch[1]) {
         merchant = fromMatch[1].trim().toUpperCase();
       }
     }
   } else {
     const vpaRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
-    const vpaMatch = smsBody.match(vpaRegex);
+    const vpaMatch = cleanBody.match(vpaRegex);
     if (vpaMatch && vpaMatch[1]) {
       let vpaName = vpaMatch[1].trim().toUpperCase();
       merchant = /^\d+$/.test(vpaName) ? 'VPA Transfer' : vpaName;
     } else {
-      // Added "towards" to catch "towards WWW ZEE5 COM"
-      const toRegex = /(?:to|at|via|towards)\s+([A-Za-z\s&'\.0-9]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn|pause)\b|[0-9]|\.\s*(?:RRN|Avl|Not))/i;
-      const toMatch = smsBody.match(toRegex);
+      // Added ; and : to stop characters so it doesn't grab the UPI ID
+      const toRegex = /(?:to|at|via|towards)\s+([A-Za-z\s&'\.0-9]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn|pause)\b|[0-9]|\.\s*(?:RRN|Avl|Not)|;|:)/i;
+      const toMatch = cleanBody.match(toRegex);
       if (toMatch && toMatch[1]) {
         merchant = toMatch[1].trim().toUpperCase();
       }
     }
   }
 
-  // Clean up trailing periods and common garbage words
-  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN|WWW|COM)\b/g, '').trim();
-  merchant = merchant.replace(/\.+$/, '').trim(); // Remove trailing periods
+  // Clean up trailing periods, semicolons, and common garbage words
+  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN|WWW|COM|NOT YOU|SMS BLOCK)\b/g, '').trim();
+  merchant = merchant.replace(/[;:\.]+$/, '').trim(); // Remove trailing semicolons, colons, periods
 
   if (merchant.length < 3) merchant = 'Unknown';
 
-  // 5. Identify Bank
+  // 6. Identify Bank
   if (upperBody.includes('HDFC')) bank = 'HDFC';
   else if (upperBody.includes('SBI')) bank = 'SBI';
   else if (upperBody.includes('ICICI')) bank = 'ICICI';
   else if (upperBody.includes('AXIS')) bank = 'AXIS';
   else if (upperBody.includes('KOTAK')) bank = 'KOTAK';
   else if (upperBody.includes('INDIAN BANK')) bank = 'Indian Bank';
+  else if (upperBody.includes('CANARA')) bank = 'Canara Bank';
 
   const date = new Date(smsDate);
   return { amount, date, bank, raw: smsBody, type, merchant };

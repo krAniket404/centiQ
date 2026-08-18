@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Alert } from 'react-native';
 import { NativeModules } from 'react-native';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const { SmsModule } = NativeModules;
 const C = {
@@ -36,10 +37,10 @@ export default function SettingsScreen({ mode, setMode, resetAppData, userLabels
         <Text style={styles.cardHeaderTitle}>PROFILE</Text>
         <View style={styles.profileRow}>
           <View style={styles.avatarBox}>
-            <Text style={styles.avatarText}>C</Text>
+            <Text style={styles.avatarText}>Q</Text>
           </View>
           <View>
-            <Text style={styles.profileName}>CentiQ User</Text>
+            <Text style={styles.profileName}>Q User</Text>
             <Text style={styles.profileMeta}>{userLabels.length} ML decisions logged</Text>
           </View>
         </View>
@@ -55,6 +56,7 @@ export default function SettingsScreen({ mode, setMode, resetAppData, userLabels
             style={[styles.modeButton, mode === 'strict' && styles.modeButtonActive]}
             onPress={() => setMode('strict')}
           >
+            <Icon name="scale-balance" size={16} color={mode === 'strict' ? '#001018' : C.textSecondary} style={{ marginRight: 6 }} />
             <Text style={[styles.modeButtonText, mode === 'strict' && styles.modeButtonTextActive]}>Strict</Text>
           </TouchableOpacity>
 
@@ -62,6 +64,7 @@ export default function SettingsScreen({ mode, setMode, resetAppData, userLabels
             style={[styles.modeButton, mode === 'liberal' && styles.modeButtonActive]}
             onPress={() => setMode('liberal')}
           >
+            <Icon name="heart-outline" size={16} color={mode === 'liberal' ? '#001018' : C.textSecondary} style={{ marginRight: 6 }} />
             <Text style={[styles.modeButtonText, mode === 'liberal' && styles.modeButtonTextActive]}>Liberal</Text>
           </TouchableOpacity>
         </View>
@@ -73,10 +76,10 @@ export default function SettingsScreen({ mode, setMode, resetAppData, userLabels
         <Text style={styles.subtext}>Your SMS data is parsed locally on your device. Cloud sync only stores parsed amounts and merchants.</Text>
 
         <TouchableOpacity style={styles.dangerButton} onPress={handleClearData}>
+          <Icon name="trash-can-outline" size={16} color={C.danger} style={{ marginRight: 8 }} />
           <Text style={styles.dangerButtonText}>Clear Local App Data</Text>
         </TouchableOpacity>
       </View>
-
     </View>
   );
 }
@@ -97,10 +100,10 @@ const styles = StyleSheet.create({
 
   // Mode Toggle
   modeRow: { flexDirection: 'row', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 4 },
-  modeButton: { flex: 1, paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  modeButtonActive: { backgroundColor: C.accent },
-  modeButtonText: { color: C.textSecondary, fontSize: 14, fontWeight: '600' },
-  modeButtonTextActive: { color: '#001018', fontWeight: 'bold' },
+  modeButton: { flex: 1, flexDirection: 'row', paddingVertical: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  modeButtonActive: { backgroundColor: C.accent, shadowColor: C.accent, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
+  modeButtonText: { color: C.textSecondary, fontSize: 13, fontWeight: '700' },
+  modeButtonTextActive: { color: '#001018', fontWeight: '800' },
 
   // Danger Zone
   dangerButton: { backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginTop: 8 },

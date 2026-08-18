@@ -1,9 +1,10 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, Modal, StyleSheet, Share } from 'react-native';
 import AnimatedNumber from './AnimatedNumber';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const C = {
-  glass: "rgba(255,255,255,0.07)", border: "rgba(255,255,255,0.12)", glassHighlight: "rgba(255,255,255,0.2)",
+  glass: "#111111", border: "rgba(255,255,255,0.12)", glassHighlight: "rgba(255,255,255,0.2)",
   textPrimary: "#FFFFFF", textSecondary: "#A0A0B0", accent: "#38BDF8", danger: "#EF4444"
 };
 
@@ -33,7 +34,7 @@ export default function MonthlyWrapModal({ visible, onClose, scores, wrapData, w
         <View style={[styles.card, { padding: 28, width: '100%' }]}>
 
           <View style={{ alignItems: 'center', marginBottom: 24 }}>
-            <Text style={{ fontSize: 40, marginBottom: 8 }}>📊</Text>
+            <Icon name="chart-box-outline" size={40} color={C.accent} style={{ marginBottom: 8 }} />
             <Text style={[styles.title, { marginBottom: 4 }]}>Monthly Wrap</Text>
             <Text style={styles.subtitle}>A snapshot of your spending behavior.</Text>
           </View>
@@ -46,7 +47,9 @@ export default function MonthlyWrapModal({ visible, onClose, scores, wrapData, w
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: `${C.accent}10`, padding: 16, borderRadius: 16, marginBottom: 16, width: '100%' }}>
-            <Text style={{ fontSize: 24, marginRight: 14 }}>🎭</Text>
+            <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: `${C.accent}20`, justifyContent: 'center', alignItems: 'center', marginRight: 14 }}>
+              <Icon name="incognito" size={20} color={C.accent} />
+            </View>
             <View style={{ flex: 1 }}>
               <Text style={{ color: C.textSecondary, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2, fontFamily: Typography.fontFamilyBold }}>FINANCIAL PERSONA</Text>
               <Text style={{ color: C.accent, fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>{wrapData.persona.name}</Text>
@@ -66,7 +69,9 @@ export default function MonthlyWrapModal({ visible, onClose, scores, wrapData, w
 
           {wrapData.biggestImpulse && (
             <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239,68,68,0.08)', padding: 16, borderRadius: 16, width: '100%', marginBottom: 24 }}>
-              <Text style={{ fontSize: 24, marginRight: 14 }}>🔥</Text>
+              <View style={{ width: 40, height: 40, borderRadius: 12, backgroundColor: 'rgba(239,68,68,0.2)', justifyContent: 'center', alignItems: 'center', marginRight: 14 }}>
+                <Icon name="flash-alert" size={20} color={C.danger} />
+              </View>
               <View style={{ flex: 1 }}>
                 <Text style={{ color: C.danger, fontSize: 10, fontWeight: '800', letterSpacing: 1.2, marginBottom: 2, fontFamily: Typography.fontFamilyBold }}>BIGGEST IMPULSE</Text>
                 <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700', fontFamily: Typography.fontFamilyBold }} numberOfLines={1}>
@@ -81,7 +86,7 @@ export default function MonthlyWrapModal({ visible, onClose, scores, wrapData, w
             style={[styles.button, { marginBottom: 12 }]}
             onPress={async () => {
               await Share.share({
-                message: `My CentiQ Monthly Wrap!\nWellness: ${scores.wellness}/100\nPersona: ${wrapData.persona.name}\nTotal Spent: ₹${Math.round(wrapData.totalSpend).toLocaleString('en-IN')}\nTop Category: ${wrapData.topCat}\n\nDecode your spending behavior with CentiQ.`
+                message: `My Q Monthly Wrap!\nWellness: ${scores.wellness}/100\nPersona: ${wrapData.persona.name}\nTotal Spent: ₹${Math.round(wrapData.totalSpend).toLocaleString('en-IN')}\nTop Category: ${wrapData.topCat}\n\nDecode your spending behavior with Q.`
               });
             }}
           >

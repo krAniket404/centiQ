@@ -1,9 +1,10 @@
 import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const C = {
-  bg: "#060608", glass: "rgba(255,255,255,0.04)", border: "rgba(255,255,255,0.08)",
+  bg: "#060608", glass: "#111111", glassHighlight: "rgba(255,255,255,0.2)", border: "rgba(255,255,255,0.12)",
   textPrimary: "#FFFFFF", textSecondary: "#A0A0B0", accent: "#38BDF8",
   success: "#10B981", warning: "#F59E0B", danger: "#EF4444", purple: "#8B5CF6"
 };
@@ -41,7 +42,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     if (avgDay > 0 && avgLate > avgDay) {
       const pct = Math.round(((avgLate - avgDay) / avgDay) * 100);
       insights.push({
-        icon: '🌙', score: pct,
+        icon: 'weather-night', score: pct,
         text: (<Text>You spend <Text style={{ color: C.warning, fontWeight: '900' }}>{pct}% more</Text> per transaction after 9 PM.</Text>)
       });
     }
@@ -52,7 +53,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     const weekendPct = totalSpend > 0 ? Math.round((weekendSpend / totalSpend) * 100) : 0;
     if (weekendPct > 35) {
       insights.push({
-        icon: '🎉', score: weekendPct,
+        icon: 'party-popper', score: weekendPct,
         text: (<Text>Your weekends are dangerous: <Text style={{ color: C.accent, fontWeight: '900' }}>{weekendPct}%</Text> of your money is spent on Sat & Sun.</Text>)
       });
     }
@@ -64,7 +65,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     const topCatPct = totalSpend > 0 ? Math.round((catTotals[topCat] / totalSpend) * 100) : 0;
     if (topCat === 'Food' && topCatPct > 30) {
       insights.push({
-        icon: '🍔', score: topCatPct,
+        icon: 'food-apple-outline', score: topCatPct,
         text: (<Text>You are a foodie: <Text style={{ color: C.warning, fontWeight: '900' }}>{topCatPct}%</Text> of your money went to food deliveries and dining.</Text>)
       });
     }
@@ -72,7 +73,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     // 4. Subscription Hoarder
     if (recurringCharges.knownSubscriptions.length >= 3) {
       insights.push({
-        icon: '📦', score: recurringCharges.knownSubscriptions.length * 10,
+        icon: 'package-variant-closed', score: recurringCharges.knownSubscriptions.length * 10,
         text: (<Text>You have <Text style={{ color: C.purple, fontWeight: '900' }}>{recurringCharges.knownSubscriptions.length} active subscriptions</Text> leaking money every month.</Text>)
       });
     }
@@ -80,7 +81,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     // 5. High Volatility (Erratic spending)
     if (scores.volatility > 0 && scores.volatility < 40) {
       insights.push({
-        icon: '📉', score: 100 - scores.volatility,
+        icon: 'chart-line-variant', score: 100 - scores.volatility,
         text: (<Text>Your spending is erratic. You go from spending nothing to massive splurges in just days.</Text>)
       });
     }
@@ -90,7 +91,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     if (maxTxn && maxTxn.amount > avgAmt * 3) {
       const anomalyPct = Math.round((maxTxn.amount / avgAmt) * 100);
       insights.push({
-        icon: '⚠️', score: anomalyPct,
+        icon: 'alert-circle-outline', score: anomalyPct,
         text: (<Text>Your largest purchase at {maxTxn.merchant || 'Unknown'} was <Text style={{ color: C.danger, fontWeight: '900' }}>{anomalyPct}% larger</Text> than your normal transaction.</Text>)
       });
     }
@@ -99,7 +100,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     const overspendAmount = (monthlyForecast?.projectedSpend || 0) - (transactions.filter(t => t.type === 'credit' && t.date.getMonth() === new Date().getMonth()).reduce((a, b) => a + b.amount, 0));
     if (overspendAmount > 1000) {
       insights.push({
-        icon: '📈', score: Math.round(overspendAmount / 100),
+        icon: 'trending-up', score: Math.round(overspendAmount / 100),
         text: (<Text>At this pace, you will overspend your income by <Text style={{ color: C.danger, fontWeight: '900' }}>₹{Math.round(overspendAmount).toLocaleString('en-IN')}</Text> this month.</Text>)
       });
     }
@@ -115,22 +116,27 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
       onRequestClose={onClose}
     >
       <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.95)' }]}>
-        <View style={[styles.card, { padding: 32, width: '100%' }]}>
+        <View style={[styles.card, { padding: 28, width: '100%' }]}>
 
-          <Text style={{ fontSize: 44, marginBottom: 16, textAlign: 'center' }}>🧠</Text>
-          <Text style={[styles.title, { fontSize: 26, marginBottom: 8 }]}>We decoded your money.</Text>
+          <View style={styles.headerBadge}>
+            <Icon name="brain" size={36} color={C.accent} />
+          </View>
+
+          <Text style={[styles.title, { fontSize: 24, marginBottom: 8, marginTop: 16 }]}>We decoded your money.</Text>
           <Text style={styles.subtitle}>
             Here is what your spending history is hiding from you:
           </Text>
 
           {wowInsights.map((insight, i) => (
             <View key={i} style={styles.insightRow}>
-              <Text style={styles.icon}>{insight.icon}</Text>
+              <View style={styles.insightIconBadge}>
+                <Icon name={insight.icon} size={20} color={C.textPrimary} />
+              </View>
               <Text style={styles.text}>{insight.text}</Text>
             </View>
           ))}
 
-          <TouchableOpacity style={[styles.button, { marginTop: 32 }]} onPress={onClose}>
+          <TouchableOpacity style={[styles.button, { marginTop: 24 }]} onPress={onClose}>
             <Text style={styles.buttonText}>See my Dashboard</Text>
           </TouchableOpacity>
 
@@ -143,18 +149,25 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
 const styles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
   card: {
-    backgroundColor: 'rgba(255,255,255,0.07)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.12)',
-    borderTopColor: 'rgba(255,255,255,0.2)', borderRadius: 32, alignItems: 'center',
+    backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderTopColor: C.glassHighlight,
+    borderRadius: 32, alignItems: 'center',
     shadowColor: "#000", shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.4, shadowRadius: 32, elevation: 12
   },
-  title: { color: C.textPrimary, fontWeight: '800', letterSpacing: -0.3, fontFamily: Typography.fontFamilyBold },
-  subtitle: { color: C.textSecondary, fontSize: 14, marginBottom: 28, textAlign: 'center', fontFamily: Typography.fontFamilyRegular },
+  headerBadge: {
+    width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(56,189,248,0.1)',
+    borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', justifyContent: 'center', alignItems: 'center'
+  },
+  title: { color: C.textPrimary, fontWeight: '800', letterSpacing: -0.3, fontFamily: Typography.fontFamilyBold, textAlign: 'center' },
+  subtitle: { color: C.textSecondary, fontSize: 13, marginBottom: 24, textAlign: 'center', fontFamily: Typography.fontFamilyRegular },
   insightRow: {
     flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 16, marginBottom: 14, width: '100%'
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 14, marginBottom: 12, width: '100%'
   },
-  icon: { fontSize: 24, marginRight: 16 },
-  text: { flex: 1, color: C.textPrimary, fontSize: 15, lineHeight: 22, fontFamily: Typography.fontFamilyMedium },
+  insightIconBadge: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center', alignItems: 'center', marginRight: 12
+  },
+  text: { flex: 1, color: C.textPrimary, fontSize: 14, lineHeight: 20, fontFamily: Typography.fontFamilyMedium },
   button: {
     backgroundColor: C.accent, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 16, width: '100%', alignItems: 'center',
     shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8

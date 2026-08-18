@@ -4,6 +4,7 @@ import { ParsedTransaction } from '../lib/smsParser';
 import { UserBehaviorModel, UserLabel } from '../lib/personalization';
 import { detectAnomaly } from '../lib/anomalyDetector';
 import { Typography } from '../theme/typography';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const C = {
   bg: "#080808", glass: "rgba(255,255,255,0.05)", border: "rgba(255,255,255,0.10)",
@@ -14,12 +15,6 @@ const CAT_COLORS: { [key: string]: string } = {
   Food: '#F59E0B', Groceries: '#84CC16', Shopping: '#8B5CF6', Travel: '#38BDF8',
   Entertainment: '#EF4444', Bills: '#10B981', Health: '#F97316', Other: '#64748B', Income: '#10B981',
   'Personal Care': '#EC4899'
-};
-
-const CAT_ICONS: { [key: string]: string } = {
-  Food: '🍔', Groceries: '🛒', Shopping: '🛍️', Travel: '✈️',
-  Entertainment: '🎬', Bills: '📄', Health: '💊', Other: '📦', Income: '💰',
-  'Personal Care': '💈'
 };
 
 const ALL_CATEGORIES = ['Food', 'Groceries', 'Shopping', 'Travel', 'Entertainment', 'Bills', 'Health', 'Personal Care', 'Other'];
@@ -56,7 +51,7 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Text style={styles.searchIcon}>🔍</Text>
+        <Icon name="magnify" size={20} color="#666" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search merchants…"
@@ -87,16 +82,16 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
       <FlatList
         data={filteredTxns}
         keyExtractor={(item) => item.id!}
-        contentContainerStyle={{ paddingBottom: 100, paddingTop: 8 }}
+        contentContainerStyle={{ paddingBottom: 120, paddingTop: 8 }}
         renderItem={({ item }) => {
           const name = item.merchant || item.bank || '?';
           const firstLetter = name.charAt(0).toUpperCase();
           const category = item.category || (item.type === 'credit' ? 'Income' : 'Other');
+          // Use category color for debits, Income color for credits
           const accentColor = item.type === 'credit' ? CAT_COLORS.Income : (CAT_COLORS[category] || CAT_COLORS.Other);
 
-          const isAnomaly = detectAnomaly(item, transactions).isAnomaly;
-          const impulseProb = userLabels.length >= 5 && item.type === 'debit' ? model.predict(model.extractFeatures(item, avgAmount)) : 0;
           const isLabeled = labeledTxnIds.includes(item.id!);
+          const isWorthIt = worthItTxnIds.includes(item.id!);
 
           return (
             <TouchableOpacity
@@ -104,70 +99,53 @@ export default function TransactionsScreen({ transactions, mode, userLabels, lab
               activeOpacity={0.8}
               onPress={() => setEditingTxn(item)}
             >
-              <View style={styles.txnRow}>
-                <View style={styles.txnLeft}>
-                  <View style={[styles.avatarBox, { backgroundColor: accentColor }]}>
-                    <Text style={styles.avatarText}>{firstLetter}</Text>
-                  </View>
-
-                  <View style={styles.txnInfo}>
-                    <Text style={styles.txnMerchant} numberOfLines={1}>{name}</Text>
-                    <View style={styles.catRow}>
-                      <View style={[styles.catDot, { backgroundColor: accentColor }]} />
-                      <Text style={styles.txnDate} numberOfLines={1}>{category} • {item.date.toLocaleDateString()}</Text>
-                    </View>
-                  </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                {/* AVATAR WITH FIRST LETTER & CATEGORY COLOR */}
+                <View style={[styles.txnIconBadge, { backgroundColor: `${accentColor}20` }]}>
+                  <Text style={[styles.avatarText, { color: accentColor }]}>{firstLetter}</Text>
                 </View>
 
-                <View style={styles.txnRight}>
-                  {impulseProb > 0.4 && (
-                    <View style={[styles.mlBadge, { backgroundColor: impulseProb > 0.7 ? 'rgba(239,68,68,0.15)' : 'rgba(16,185,129,0.15)' }]}>
-                      <Text style={[styles.mlBadgeText, { color: impulseProb > 0.7 ? C.danger : C.success }]}>
-                        {Math.round(impulseProb * 100)}% Impulse
-                      </Text>
-                    </View>
-                  )}
-                  {isAnomaly && (
-                    <View style={[styles.mlBadge, { backgroundColor: 'rgba(245,158,11,0.15)' }]}>
-                      <Text style={[styles.mlBadgeText, { color: C.warning }]}>⚠️ Unusual</Text>
-                    </View>
-                  )}
-                  <Text style={[styles.txnAmount, { color: item.type === 'credit' ? C.success : C.textPrimary }]}>
-                    {item.type === 'credit' ? '+' : '-'}₹{Math.round(Number(item.amount) || 0).toLocaleString('en-IN')}
-                  </Text>
-                  <View style={styles.statusPill}>
-                    <Text style={styles.statusText}>Done</Text>
-                  </View>
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <Text style={styles.txnMerchant} numberOfLines={1}>{name}</Text>
+                  <Text style={styles.txnCategory}>{category} • {new Date(item.date).toLocaleDateString()}</Text>
                 </View>
+
+                <Text style={[styles.txnAmount, { color: item.type === 'credit' ? C.success : C.textPrimary }]}>
+                  {item.type === 'credit' ? '+' : '-'}₹{Math.round(item.amount).toLocaleString('en-IN')}
+                </Text>
               </View>
 
-              {/* ALWAYS show labeling buttons for debits in Liberal Mode */}
+              {/* ACTION BUTTONS FOR LIBERAL MODE */}
               {item.type === 'debit' && mode === 'liberal' && (
-                <View style={[styles.labelContainer, { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }]}>
+                <View style={styles.txnActionRow}>
                   {!isLabeled ? (
                     <>
-                      <Text style={styles.labelPrompt}>Happy with this purchase?</Text>
-                      <View style={styles.buttonRow}>
-                        <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(16,185,129,0.1)' }]} onPress={() => handleLabelTransaction(item, false)}>
-                          <Text style={[styles.labelButtonText, { color: C.success }]}>Worth it</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity style={[styles.labelButton, { backgroundColor: 'rgba(239,68,68,0.1)' }]} onPress={() => handleLabelTransaction(item, true)}>
-                          <Text style={[styles.labelButtonText, { color: C.danger }]}>Impulsive</Text>
-                        </TouchableOpacity>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <Text style={styles.currentLabelText}>
-                        {worthItTxnIds.includes(item.id!) ? '✅ Logged as Worth It' : '❤️‍🔥 Logged as Impulsive'}
-                      </Text>
-                      <TouchableOpacity onPress={() => {
-                        const isCurrentlyWorthIt = worthItTxnIds.includes(item.id!);
-                        handleLabelTransaction(item, isCurrentlyWorthIt ? true : false);
-                      }}>
-                        <Text style={styles.changeText}>Change to {worthItTxnIds.includes(item.id!) ? 'Impulsive' : 'Worth It'}</Text>
+                      <TouchableOpacity
+                        style={[styles.actionPill, { borderColor: C.success }]}
+                        onPress={() => handleLabelTransaction(item, false)}
+                      >
+                        <Icon name="check-circle-outline" size={14} color={C.success} />
+                        <Text style={[styles.actionPillText, { color: C.success }]}>Worth It</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.actionPill, { borderColor: C.danger }]}
+                        onPress={() => handleLabelTransaction(item, true)}
+                      >
+                        <Icon name="flash-outline" size={14} color={C.danger} />
+                        <Text style={[styles.actionPillText, { color: C.danger }]}>Impulsive</Text>
                       </TouchableOpacity>
                     </>
+                  ) : (
+                    <View style={styles.labeledContainer}>
+                      <Icon name={isWorthIt ? 'check-circle' : 'flash'} size={16} color={isWorthIt ? C.success : C.danger} />
+                      <Text style={styles.currentLabelText}>
+                        Logged as {isWorthIt ? 'Worth It' : 'Impulsive'}
+                      </Text>
+                      <TouchableOpacity onPress={() => handleLabelTransaction(item, isWorthIt)}>
+                        <Text style={styles.changeText}>Change</Text>
+                      </TouchableOpacity>
+                    </View>
                   )}
                 </View>
               )}
@@ -229,7 +207,7 @@ const styles = StyleSheet.create({
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
     borderRadius: 16, paddingHorizontal: 16, marginBottom: 20, height: 52
   },
-  searchIcon: { fontSize: 16, marginRight: 12, color: '#666' },
+  searchIcon: { marginRight: 12 },
   searchInput: { flex: 1, color: C.textPrimary, fontSize: 15, fontFamily: Typography.fontFamilyRegular },
 
   // Category Chips
@@ -245,43 +223,39 @@ const styles = StyleSheet.create({
 
   // Transaction Card
   txnCard: {
-    backgroundColor: 'rgba(255,255,255,0.04)', borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1,
-    borderRadius: 24, padding: 18, marginBottom: 14,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.25, shadowRadius: 12, elevation: 3
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: 'rgba(255,255,255,0.08)', borderWidth: 1,
+    borderRadius: 20, padding: 18, marginBottom: 14,
   },
-  txnRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 
-  // Left Side (Avatar + Info)
-  txnLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, marginRight: 12 },
-  avatarBox: {
-    width: 44, height: 44, borderRadius: 14, // The "Squircle" shape!
-    justifyContent: 'center', alignItems: 'center', marginRight: 14,
-    shadowColor: "#000", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 4
+  // Icon Badge (Avatar)
+  txnIconBadge: {
+    width: 44, height: 44, borderRadius: 14,
+    justifyContent: 'center', alignItems: 'center',
   },
-  avatarText: { color: '#FFFFFF', fontSize: 18, fontWeight: '900', fontFamily: Typography.fontFamilyBold },
-
-  txnInfo: { flexShrink: 1 },
+  avatarText: { fontSize: 18, fontWeight: '900', fontFamily: Typography.fontFamilyBold },
   txnMerchant: { color: C.textPrimary, fontSize: 15, fontWeight: '700', marginBottom: 3, fontFamily: Typography.fontFamilyBold },
-  catRow: { flexDirection: 'row', alignItems: 'center' },
-  catDot: { width: 6, height: 6, borderRadius: 3, marginRight: 6 },
-  txnDate: { color: C.textSecondary, fontSize: 12, fontFamily: Typography.fontFamilyRegular },
+  txnCategory: { color: C.textSecondary, fontSize: 12, fontFamily: Typography.fontFamilyRegular },
+  txnAmount: { fontSize: 15, fontWeight: '800', fontFamily: Typography.fontFamilyBold },
 
-  // Right Side (Badges + Amount)
-  txnRight: { flexDirection: 'column', alignItems: 'flex-end' },
-  mlBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, marginBottom: 4 },
-  mlBadgeText: { fontSize: 10.5, fontWeight: '800', fontFamily: Typography.fontFamilyBold },
-  txnAmount: { fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold },
-  statusPill: { backgroundColor: 'rgba(255,255,255,0.06)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6, marginTop: 4 },
-  statusText: { color: C.textSecondary, fontSize: 10, fontWeight: '600', fontFamily: Typography.fontFamilyMedium },
+  // Action Buttons
+  txnActionRow: {
+    flexDirection: 'row', gap: 10, marginTop: 14, paddingTop: 14,
+    borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)',
+  },
+  actionPill: {
+    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    paddingVertical: 8, borderRadius: 980, borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.02)',
+  },
+  actionPillText: { fontSize: 12, fontWeight: '700' },
 
-  // Liberal Mode Labeling UI
-  labelContainer: { borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.05)', paddingTop: 14, marginTop: 14, alignItems: 'center' },
-  labelPrompt: { color: C.textSecondary, fontSize: 13, marginBottom: 10, fontFamily: Typography.fontFamilyMedium },
-  buttonRow: { flexDirection: 'row', gap: 10, width: '100%' },
-  labelButton: { flex: 1, paddingVertical: 10, borderRadius: 12, alignItems: 'center' },
-  labelButtonText: { fontWeight: '800', fontSize: 13, fontFamily: Typography.fontFamilyBold },
-  currentLabelText: { color: C.textSecondary, fontSize: 13, fontWeight: '600', fontFamily: Typography.fontFamilyMedium },
-  changeText: { color: C.accent, fontSize: 12, fontWeight: '700', fontFamily: Typography.fontFamilyBold },
+  // Labeled State
+  labeledContainer: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%',
+  },
+  currentLabelText: { color: C.textSecondary, fontSize: 13, fontWeight: '600', flex: 1, marginLeft: 4 },
+  changeText: { color: C.accent, fontSize: 12, fontWeight: '700' },
 
   // Category Edit Modal
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'flex-end' },

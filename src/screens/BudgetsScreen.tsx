@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, StyleSheet, ScrollView, Animated, NativeModules, Modal, TouchableOpacity, FlatList } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
 import { Typography } from '../theme/typography';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const { SmsModule } = NativeModules;
 
@@ -27,9 +28,9 @@ const CAT_COLORS: { [key: string]: string } = {
 };
 
 const CAT_ICONS: { [key: string]: string } = {
-  Food: '🍔', Groceries: '🛒', Shopping: '🛍️', Travel: '✈️',
-  Entertainment: '🎬', Bills: '📄', Health: '💊', Other: '📦', Income: '💰',
-  'Personal Care': '💈'
+  Food: 'food-apple-outline', Groceries: 'cart-outline', Shopping: 'shopping-outline', Travel: 'airplane',
+  Entertainment: 'movie-open-outline', Bills: 'file-document-outline', Health: 'pill', Other: 'package-variant-closed', Income: 'cash-multiple',
+  'Personal Care': 'content-cut'
 };
 
 const DEFAULT_BUDGETS: { [key: string]: number } = {
@@ -237,12 +238,12 @@ export default function BudgetsScreen({ transactions }: Props) {
             <View style={styles.modalHeader}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <View style={[styles.modalIconBadge, { backgroundColor: `${CAT_COLORS[viewingCategory || 'Other']}22` }]}>
-                  <Text style={{ fontSize: 16 }}>{CAT_ICONS[viewingCategory || 'Other']}</Text>
+                  <Icon name={CAT_ICONS[viewingCategory || 'Other']} size={18} color={CAT_COLORS[viewingCategory || 'Other']} />
                 </View>
                 <Text style={styles.modalTitle}>{viewingCategory} Transactions</Text>
               </View>
               <TouchableOpacity style={styles.closeButtonWrap} activeOpacity={0.75} onPress={() => setViewingCategory(null)}>
-                <Text style={styles.closeButton}>✕</Text>
+                <Icon name="close" size={18} color={C.textSecondary} />
               </TouchableOpacity>
             </View>
 
@@ -296,7 +297,7 @@ function BudgetCard({
       <View style={styles.budgetHeaderRow}>
         <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
           <View style={[styles.categoryIconBadge, { backgroundColor: `${CAT_COLORS[category] || C.textSecondary}1F` }]}>
-            <Text style={styles.categoryIcon}>{CAT_ICONS[category] || '📦'}</Text>
+            <Icon name={CAT_ICONS[category] || 'package-variant-closed'} size={16} color={CAT_COLORS[category] || C.textSecondary} />
           </View>
           <Text style={styles.categoryName}>{category}</Text>
           {isOver && (
@@ -384,7 +385,7 @@ const styles = StyleSheet.create({
   categoryIconBadge: {
     width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', marginRight: 10,
   },
-  categoryIcon: { fontSize: 14 },
+  // categoryIcon style removed - using Icon component now
   categoryName: { color: C.textPrimary, fontSize: 15, fontWeight: '700' },
   overBadge: {
     marginLeft: 8, backgroundColor: 'rgba(239,68,68,0.15)', borderRadius: 6,
@@ -440,11 +441,7 @@ const styles = StyleSheet.create({
     width: 32, height: 32, borderRadius: 16, backgroundColor: 'rgba(255,255,255,0.06)',
     alignItems: 'center', justifyContent: 'center',
   },
-  closeButton: {
-    color: C.textSecondary,
-    fontSize: 15,
-    fontWeight: 'bold',
-  },
+  // closeButton style removed - using Icon component now
   modalTxnRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',

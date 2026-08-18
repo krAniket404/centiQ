@@ -139,10 +139,15 @@ export default function App() {
 
       // 1. 8:00 AM - Daily Allowance Reminder
       const morningMsg = dailyAllowance > 0
-        ? `You have ₹${dailyAllowance.toLocaleString('en-IN')} left to spend today to stay on track.`
+        ? `You have ₹${dailyAllowance.toLocaleString('en-IN')} left to spend today.`
         : `You are over budget. Try to minimize spending today.`;
 
-      SmsModule.scheduleDailyReminder(8, 0, "cQ Daily Check-in", morningMsg)
+      // Append the daily quote to the notification
+      const fullNotificationMsg = dailyQuote
+        ? `${morningMsg}\n\n💬 "${dailyQuote}"`
+        : morningMsg;
+
+      SmsModule.scheduleDailyReminder(8, 0, "Q Daily Check-in", fullNotificationMsg)
         .catch((e: any) => console.warn("Failed to schedule morning reminder", e));
 
       // 2. 9:00 PM - Streak Warning (Only if they have an active streak)
@@ -1073,21 +1078,18 @@ return (
                   <Text style={styles.greeting}>
                     {(() => {
                       const h = new Date().getHours();
-                      if (h < 12) return 'Good morning ☀️';
-                      if (h < 17) return 'Good afternoon 🌤️';
-                      if (h < 22) return 'Good evening 🌙';
-                      return 'Working late? 🦉';
+                      if (h < 12) return 'Good morning';
+                      if (h < 17) return 'Good afternoon';
+                      if (h < 22) return 'Good evening';
+                      return 'Working late?';
                     })()}
                   </Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                  {/* Wrap Button */}
                   <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowMonthlyWrap(true)}>
                     <Icon name="gift-outline" size={16} color={C.textPrimary} />
                     <Text style={styles.wrapButtonText}>Wrap</Text>
                   </TouchableOpacity>
-
-                  {/* Reset Button */}
                   <TouchableOpacity style={styles.syncPill} activeOpacity={0.8} onPress={resetAppData}>
                     <View style={styles.syncDot} />
                     <Text style={styles.syncText}>Reset</Text>
@@ -1095,11 +1097,11 @@ return (
                 </View>
               </View>
 
-              {/* Financial Wellness Card (Heavy Glass) */}
+              {/* Financial Wellness Card */}
               <WellnessCard scores={scores} />
 
               {/* Financial Persona Card */}
-              <View style={[styles.glassCardHeavy, { padding: 22, marginBottom: 18, flexDirection: 'row', alignItems: 'center' }]}>
+              <View style={[styles.glassCardHeavy, { padding: 20, marginBottom: 14, flexDirection: 'row', alignItems: 'center' }]}>
                 <View style={[
                   styles.personaIconBadge,
                   {
@@ -1110,32 +1112,20 @@ return (
                 ]}>
                   <Icon name={behavioralProfile.persona.icon} size={28} color={behavioralProfile.persona.color} />
                 </View>
-                <View style={{ flex: 1, marginLeft: 16 }}>
+                <View style={{ flex: 1, marginLeft: 14 }}>
                   <Text style={styles.personaLabel}>YOUR FINANCIAL PERSONA</Text>
                   <Text style={[styles.personaName, { color: behavioralProfile.persona.color }]}>{behavioralProfile.persona.name}</Text>
                   <Text style={styles.personaDesc}>{behavioralProfile.persona.desc}</Text>
                 </View>
               </View>
 
-              {/* Daily Money Quote Card */}
-              {dailyQuote && (
-                <View style={[styles.glassCard, { padding: 22, marginBottom: 18, borderLeftWidth: 3, borderLeftColor: C.accent }]}>
-                  <Text style={{ color: C.accent, fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 10, fontFamily: Typography.fontFamilyBold }}>QUOTE OF THE DAY</Text>
-                  <Text style={{ color: C.textPrimary, fontSize: 15, lineHeight: 22, fontStyle: 'italic', fontFamily: Typography.fontFamilyRegular, marginBottom: 8 }}>
-                    "{dailyQuote.split(' - ')[0]}"
-                  </Text>
-                  {dailyQuote.split(' - ')[1] && (
-                    <Text style={{ color: C.textSecondary, fontSize: 13, fontWeight: '700', fontFamily: Typography.fontFamilyBold }}>
-                      - {dailyQuote.split(' - ')[1]}
-                    </Text>
-                  )}
-                </View>
-              )}
-
               {/* Dynamic Discipline Streaks Card */}
-              <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                  <Text style={styles.cardHeaderTitle}>DISCIPLINE STREAKS 🔥</Text>
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Icon name="fire" size={16} color={C.warning} />
+                    <Text style={styles.cardHeaderTitle}>DISCIPLINE STREAKS</Text>
+                  </View>
                   <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowStreakModal(true)}>
                     <Text style={styles.wrapButtonText}>Manage</Text>
                   </TouchableOpacity>
@@ -1148,17 +1138,19 @@ return (
                 ) : (
                   activeStreaks.map(id => {
                     const config = {
-                      late_night: { icon: '🌙', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
-                      weekend: { icon: '🎉', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
-                      food_delivery: { icon: '🛵', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
-                      online_shopping: { icon: '📦', name: 'Online Shopping', desc: 'No Amazon/Flipkart' }
+                      late_night: { icon: 'weather-night', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
+                      weekend: { icon: 'party-popper', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
+                      food_delivery: { icon: 'food-apple-outline', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
+                      online_shopping: { icon: 'shopping-outline', name: 'Online Shopping', desc: 'No Amazon/Flipkart' }
                     }[id];
 
                     if (!config) return null;
 
                     return (
-                      <View key={id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                        <Text style={{ fontSize: 24, marginRight: 14 }}>{config.icon}</Text>
+                      <View key={id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                        <View style={[styles.insightIconBadge, { backgroundColor: `${C.warning}20`, marginRight: 12 }]}>
+                           <Icon name={config.icon} size={16} color={C.warning} />
+                        </View>
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700' }}>{streakData[id] || 0} Days</Text>
                           <Text style={{ color: C.textSecondary, fontSize: 12 }}>{config.name}</Text>
@@ -1171,9 +1163,12 @@ return (
               </View>
 
               {/* The 24-Hour Rule Card */}
-              <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                  <Text style={styles.cardHeaderTitle}>THE 24-HOUR RULE ⏳</Text>
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Icon name="timer-sand" size={16} color={C.accent} />
+                    <Text style={styles.cardHeaderTitle}>THE 24-HOUR RULE</Text>
+                  </View>
                   <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowPauseModal(true)}>
                     <Text style={styles.wrapButtonText}>+ Add</Text>
                   </TouchableOpacity>
@@ -1190,7 +1185,7 @@ return (
                     const hoursLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60)));
 
                     return (
-                      <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                      <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
                         <View style={{ flex: 1, marginRight: 12 }}>
                           <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{p.name}</Text>
                           <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 2 }}>
@@ -1207,7 +1202,7 @@ return (
                             </TouchableOpacity>
                           </View>
                         ) : (
-                          <Text style={{ color: C.accent, fontSize: 22, fontWeight: 'bold' }}>🔒</Text>
+                          <Icon name="lock" size={22} color={C.accent} />
                         )}
                       </View>
                     );
@@ -1216,11 +1211,9 @@ return (
               </View>
 
               {/* Behavioral Heatmap */}
-              <View style={[styles.glassCard, { padding: 22, marginBottom: 18 }]}>
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <Text style={styles.cardHeaderTitle}>30-DAY BEHAVIOR MAP</Text>
-
-                  {/* Dynamic Day Info */}
                   {activeHeatmapDay !== null && behavioralProfile.heatmap[activeHeatmapDay] ? (
                     <Text style={styles.heatmapSelectedText}>
                       {behavioralProfile.heatmap[activeHeatmapDay].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ₹{Math.round(behavioralProfile.heatmap[activeHeatmapDay].amount).toLocaleString('en-IN')}
@@ -1232,9 +1225,9 @@ return (
 
                 <View style={styles.heatmapGrid}>
                   {behavioralProfile.heatmap.map((day, i) => {
-                    let bgColor = 'rgba(255,255,255,0.05)'; // No spend
-                    if (day.amount > 0 && !day.isImpulsive) bgColor = 'rgba(56,189,248,0.3)'; // Normal spend
-                    if (day.amount > 0 && day.isImpulsive) bgColor = C.danger; // Impulsive spend
+                    let bgColor = 'rgba(255,255,255,0.05)';
+                    if (day.amount > 0 && !day.isImpulsive) bgColor = 'rgba(56,189,248,0.3)';
+                    if (day.amount > 0 && day.isImpulsive) bgColor = C.danger;
                     const isSelected = activeHeatmapDay === i;
 
                     return (
@@ -1266,12 +1259,12 @@ return (
                 </View>
               </View>
 
-              {/* Digital Subscriptions Card (Always Visible) */}
-              <View style={[styles.glassCard, { padding: 22, marginBottom: 16, borderColor: 'rgba(56,189,248,0.22)' }]}>
+              {/* Digital Subscriptions Card */}
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14, borderColor: 'rgba(56,189,248,0.22)' }]}>
                 <View style={styles.cardTopRow}>
                   <View style={styles.cardTitleWithIcon}>
                     <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)' }]}>
-                      <Text style={styles.iconBadgeGlyph}>🎬</Text>
+                      <Icon name="movie-open-outline" size={16} color={C.accent} />
                     </View>
                     <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>SUBSCRIPTIONS</Text>
                   </View>
@@ -1282,7 +1275,7 @@ return (
 
                 {recurringCharges.knownSubscriptions.length === 0 ? (
                   <View style={{ alignItems: 'center', paddingVertical: 14 }}>
-                    <Text style={{ fontSize: 28, marginBottom: 8 }}>🎉</Text>
+                    <Icon name="check-circle-outline" size={32} color={C.success} style={{ marginBottom: 8 }} />
                     <Text style={{ color: C.success, fontSize: 13.5, fontWeight: '700', marginBottom: 6, letterSpacing: 0.4 }}>NO SUBSCRIPTION LEAKS</Text>
                     <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
                       Great job! We didn't find any sneaky digital subscriptions in your history. Keep it up!
@@ -1306,13 +1299,13 @@ return (
                 )}
               </View>
 
-              {/* Repetitive Payments Card (Only if they exist) */}
+              {/* Repetitive Payments Card */}
               {recurringCharges.repetitivePayments.length > 0 && (
-                <View style={[styles.glassCard, { padding: 22, marginBottom: 16, borderColor: 'rgba(245,158,11,0.22)' }]}>
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14, borderColor: 'rgba(245,158,11,0.22)' }]}>
                   <View style={styles.cardTopRow}>
                     <View style={styles.cardTitleWithIcon}>
                       <View style={[styles.iconBadge, { backgroundColor: 'rgba(245,158,11,0.14)' }]}>
-                        <Text style={styles.iconBadgeGlyph}>⚠️</Text>
+                        <Icon name="alert-circle-outline" size={16} color={C.warning} />
                       </View>
                       <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.warning }]}>REPETITIVE PAYMENTS</Text>
                     </View>
@@ -1322,7 +1315,6 @@ return (
                     We detected {recurringCharges.repetitivePayments.length} recurring charges (bills, rent, gyms, etc). Tap to view dates.
                   </Text>
 
-                  {/* Show only top 3, or all if showAllRepetitive is true */}
                   {(showAllRepetitive ? recurringCharges.repetitivePayments : recurringCharges.repetitivePayments.slice(0, 3)).map((l, i) => {
                     const key = `${l.merchant}-${l.amount}`;
                     const isExpanded = expandedCharge === key;
@@ -1354,7 +1346,6 @@ return (
                     );
                   })}
 
-                  {/* View More / View Less Button */}
                   {recurringCharges.repetitivePayments.length > 3 && (
                     <TouchableOpacity
                       style={{ alignItems: 'center', paddingVertical: 14, marginTop: 4 }}
@@ -1371,17 +1362,17 @@ return (
 
               {/* AI Behavior Feed */}
               {behaviorFeed.length > 0 && (
-                <View style={{ marginBottom: 16 }}>
+                <View style={{ marginBottom: 14 }}>
                   <Text style={styles.cardHeaderTitle}>AI BEHAVIOR FEED</Text>
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
-                    contentContainerStyle={{ paddingRight: 20 }}
+                    contentContainerStyle={{ paddingRight: 20, paddingTop: 8 }}
                   >
                     {behaviorFeed.map((insight, i) => (
                       <View key={i} style={[styles.insightCard, { borderColor: `${insight.color}30` }]}>
                         <View style={[styles.insightIconBadge, { backgroundColor: `${insight.color}20` }]}>
-                          <Text style={{ fontSize: 14 }}>{insight.icon === 'calendar' ? '📅' : insight.icon === 'moon' ? '🌙' : insight.icon === 'tag' ? '🏷️' : '⚠️'}</Text>
+                          <Icon name={insight.icon} size={16} color={insight.color} />
                         </View>
                         <Text style={[styles.insightTitle, { color: insight.color }]}>{insight.title}</Text>
                         <Text style={styles.insightText}>{insight.text}</Text>
@@ -1392,10 +1383,10 @@ return (
               )}
 
               {/* AI Monthly Forecast Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
                   <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)', marginRight: 12 }]}>
-                    <Text style={styles.iconBadgeGlyph}>📈</Text>
+                    <Icon name="chart-line" size={16} color={C.accent} />
                   </View>
                   <View>
                     <Text style={styles.cardHeaderTitle}>NEXT MONTH FORECAST</Text>
@@ -1419,7 +1410,6 @@ return (
                   </View>
                 </View>
 
-                {/* Risk Bar */}
                 <View style={styles.riskBarBackground}>
                   <View style={[
                     styles.riskBarFill,
@@ -1436,7 +1426,7 @@ return (
               </View>
 
               {/* Savings Goals Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Text style={styles.cardHeaderTitle}>SAVINGS VAULT</Text>
                   <TouchableOpacity onPress={() => setShowAddGoalModal(true)}>
@@ -1462,7 +1452,6 @@ return (
                         </View>
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
                           <Text style={styles.goalDeadline}>{Math.round(pct)}% complete</Text>
-                          {/* NEW DEPOSIT BUTTON */}
                           <TouchableOpacity
                             style={[styles.depositButton, { borderColor: `${goal.color}50` }]}
                             onPress={() => setDepositGoalId(goal.id)}
@@ -1477,7 +1466,7 @@ return (
               </View>
 
               {/* Premium Weekly Spending Chart */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
+              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
                 <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                   <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING</Text>
                   <Text style={styles.subtleText}>
@@ -1485,7 +1474,6 @@ return (
                   </Text>
                 </View>
 
-                {/* Week Selector */}
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -1504,7 +1492,6 @@ return (
                   ))}
                 </ScrollView>
 
-                {/* The Chart (Direct Render) */}
                 {monthlyWeeklyData[activeWeekIndex] && (
                   <PremiumChart
                     data={monthlyWeeklyData[activeWeekIndex].data}
@@ -1885,37 +1872,56 @@ return (
         wrapData={monthlyWrapData}
         wellnessColor={getDynamicScoreColor(scores.wellness, 'higher_is_better')}
       />
-
-      {/* Tab Bar */}
-      <View style={styles.tabBar}>
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('dashboard'); }}>
-          {activeTab === 'dashboard' && <View style={styles.tabActivePill} />}
-          <Text style={[styles.tabIcon, activeTab === 'dashboard' && styles.tabIconActive]}>◉</Text>
-          <Text style={[styles.tabLabel, activeTab === 'dashboard' && styles.tabLabelActive]}>Dashboard</Text>
+      {/* PREMIUM FLOATING BOTTOM NAVIGATION */}
+      <View style={styles.bottomNavContainer}>
+        <TouchableOpacity
+          style={styles.tabButton}
+          activeOpacity={0.7}
+          onPress={() => setActiveTab('dashboard')}
+        >
+          <Icon name="view-dashboard-outline" size={24} color={activeTab === 'dashboard' ? C.accent : C.textSecondary} />
+          <Text style={[styles.tabLabel, { color: activeTab === 'dashboard' ? C.accent : C.textSecondary }]}>Home</Text>
+          {activeTab === 'dashboard' && <View style={styles.activeDot} />}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('transactions'); }}>
-          {activeTab === 'transactions' && <View style={styles.tabActivePill} />}
-          <Text style={[styles.tabIcon, activeTab === 'transactions' && styles.tabIconActive]}>≣</Text>
-          <Text style={[styles.tabLabel, activeTab === 'transactions' && styles.tabLabelActive]}>Transactions</Text>
+        <TouchableOpacity
+          style={styles.tabButton}
+          activeOpacity={0.7}
+          onPress={() => setActiveTab('transactions')}
+        >
+          <Icon name="swap-horizontal" size={24} color={activeTab === 'transactions' ? C.accent : C.textSecondary} />
+          <Text style={[styles.tabLabel, { color: activeTab === 'transactions' ? C.accent : C.textSecondary }]}>Spend</Text>
+          {activeTab === 'transactions' && <View style={styles.activeDot} />}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('budgets'); }}>
-          {activeTab === 'budgets' && <View style={styles.tabActivePill} />}
-          <Text style={[styles.tabIcon, activeTab === 'budgets' && styles.tabIconActive]}>◍</Text>
-          <Text style={[styles.tabLabel, activeTab === 'budgets' && styles.tabLabelActive]}>Budgets</Text>
+        <TouchableOpacity
+          style={styles.tabButton}
+          activeOpacity={0.7}
+          onPress={() => setActiveTab('budgets')}
+        >
+          <Icon name="chart-pie" size={24} color={activeTab === 'budgets' ? C.accent : C.textSecondary} />
+          <Text style={[styles.tabLabel, { color: activeTab === 'budgets' ? C.accent : C.textSecondary }]}>Budget</Text>
+          {activeTab === 'budgets' && <View style={styles.activeDot} />}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('coach'); }}>
-          {activeTab === 'coach' && <View style={styles.tabActivePill} />}
-          <Text style={[styles.tabIcon, activeTab === 'coach' && styles.tabIconActive]}>✦</Text>
-          <Text style={[styles.tabLabel, activeTab === 'coach' && styles.tabLabelActive]}>AI Coach</Text>
+        <TouchableOpacity
+          style={styles.tabButton}
+          activeOpacity={0.7}
+          onPress={() => setActiveTab('coach')}
+        >
+          <Icon name="robot-outline" size={24} color={activeTab === 'coach' ? C.accent : C.textSecondary} />
+          <Text style={[styles.tabLabel, { color: activeTab === 'coach' ? C.accent : C.textSecondary }]}>Coach</Text>
+          {activeTab === 'coach' && <View style={styles.activeDot} />}
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.tabButton} activeOpacity={0.75} onPress={() => { triggerHaptic(20); setActiveTab('settings'); }}>
-          {activeTab === 'settings' && <View style={styles.tabActivePill} />}
-          <Text style={[styles.tabIcon, activeTab === 'settings' && styles.tabIconActive]}>☰</Text>
-          <Text style={[styles.tabLabel, activeTab === 'settings' && styles.tabLabelActive]}>Settings</Text>
+        <TouchableOpacity
+          style={styles.tabButton}
+          activeOpacity={0.7}
+          onPress={() => setActiveTab('settings')}
+        >
+          <Icon name="cog-outline" size={24} color={activeTab === 'settings' ? C.accent : C.textSecondary} />
+          <Text style={[styles.tabLabel, { color: activeTab === 'settings' ? C.accent : C.textSecondary }]}>More</Text>
+          {activeTab === 'settings' && <View style={styles.activeDot} />}
         </TouchableOpacity>
       </View>
     </View>
@@ -2161,6 +2167,50 @@ const styles = StyleSheet.create({
   },
   wowIcon: { fontSize: 24, marginRight: 16 },
   wowText: { flex: 1, color: C.textPrimary, fontSize: 15, lineHeight: 22, fontFamily: Typography.fontFamilyMedium },
+  bottomNavContainer: {
+    position: 'absolute',
+    bottom: 20,
+    left: 20,
+    right: 20,
+    height: 70,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(20, 20, 25, 0.8)', // Dark glass
+    borderRadius: 35, // Fully rounded pill shape
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 15,
+    elevation: 15, // Android shadow
+  },
+  tabButton: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    height: '100%',
+  },
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  activeDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: C.accent,
+    marginTop: 4,
+    shadowColor: C.accent, // Glow effect
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 1,
+    shadowRadius: 4,
+  },
 });
 
 export default App;

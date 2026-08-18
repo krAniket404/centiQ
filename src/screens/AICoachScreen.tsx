@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TextInput, TouchableOpacity, FlatList, StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator, NativeModules, ScrollView, Modal } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
+import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 
 const { SmsModule } = NativeModules;
 const SESSIONS_STORAGE_KEY = 'centiq_chat_sessions_v2'; // New key to reset old chats
@@ -18,12 +19,12 @@ interface Props {
 }
 
 const SUGGESTED_QUESTIONS = [
-  "Roast my spending habits 🔥",
-  "Why is my impulse score high?",
-  "Give me a harsh saving tip",
-  "What is my financial persona?",
-  "How much did I waste on food?",
-  "Tell me a finance joke"
+  { text: "Roast my spending habits", icon: "fire" },
+  { text: "Why is my impulse score high?", icon: "flash-outline" },
+  { text: "Give me a harsh saving tip", icon: "piggy-bank-outline" },
+  { text: "What is my financial persona?", icon: "incognito" },
+  { text: "How much did I waste on food?", icon: "food-apple-outline" },
+  { text: "Tell me a finance joke", icon: "emoticon-lol-outline" }
 ];
 
 // PASTE YOUR GEMINI API KEY HERE
@@ -187,32 +188,31 @@ export default function AICoachScreen({ transactions, scores }: Props) {
   return (
     <KeyboardAvoidingView style={{ flex: 1, marginTop: 20 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'} keyboardVerticalOffset={90}>
       <View style={styles.headerRow}>
-        <TouchableOpacity onPress={() => setShowHistory(true)} style={styles.headerButton}>
-          <Text style={styles.headerButtonText}>☰</Text>
-          <Text style={styles.headerButtonText}>History</Text>
+        <TouchableOpacity onPress={() => setShowHistory(true)} style={styles.iconButton}>
+          <Icon name="history" size={22} color={C.textSecondary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>AI Coach</Text>
-        <TouchableOpacity onPress={startNewChat} style={styles.headerButton}>
-          <Text style={styles.headerButtonText}>✎</Text>
-          <Text style={styles.headerButtonText}>New</Text>
+        <Text style={styles.headerTitle}>Q Coach</Text>
+        <TouchableOpacity onPress={startNewChat} style={styles.iconButton}>
+          <Icon name="pencil-plus-outline" size={22} color={C.textSecondary} />
         </TouchableOpacity>
       </View>
 
       {messages.length === 0 ? (
-        <View style={{ flex: 1, paddingHorizontal: 4 }}>
-          <View style={styles.emptyStateBubble}>
-            <Text style={styles.emptyStateText}>
-              Hi! I'm your CentiQ AI Coach. I'm sarcastic, funny, and I know your spending habits better than you do. Ask me to roast your spending, or ask me literally anything else.
-            </Text>
+        <View style={styles.emptyStateContainer}>
+          <View style={styles.emptyStateAvatar}>
+            <Icon name="robot-outline" size={40} color={C.accent} />
           </View>
-          <Text style={[styles.cardHeaderTitle, { marginTop: 20, marginBottom: 12 }]}>SUGGESTED QUESTIONS</Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <Text style={styles.emptyStateTitle}>Meet your Q Coach</Text>
+          <Text style={styles.emptyStateText}>Sarcastic, funny, and knows your spending habits better than you do.</Text>
+
+          <View style={styles.suggestionsWrapper}>
             {SUGGESTED_QUESTIONS.map((q, i) => (
-              <TouchableOpacity key={i} style={styles.suggestedChip} onPress={() => sendMessage(q)}>
-                <Text style={styles.suggestedChipText}>{q}</Text>
+              <TouchableOpacity key={i} style={styles.suggestedChip} onPress={() => sendMessage(q.text)}>
+                <Icon name={q.icon} size={14} color={C.accent} style={{ marginRight: 6 }} />
+                <Text style={styles.suggestedChipText}>{q.text}</Text>
               </TouchableOpacity>
             ))}
-          </ScrollView>
+          </View>
         </View>
       ) : (
         <FlatList
@@ -231,11 +231,10 @@ export default function AICoachScreen({ transactions, scores }: Props) {
       {isLoading && (
         <View style={styles.loadingContainer}>
           <ActivityIndicator color={C.accent} size="small" />
-          <Text style={styles.loadingText}>Thinking of a joke...</Text>
         </View>
       )}
 
-      <View style={styles.inputContainer}>
+      <View style={styles.inputWrapper}>
         <TextInput
           style={styles.input}
           placeholder="Ask me anything..."
@@ -245,7 +244,7 @@ export default function AICoachScreen({ transactions, scores }: Props) {
           multiline
         />
         <TouchableOpacity style={styles.sendButton} onPress={() => sendMessage()} disabled={isLoading}>
-          <Text style={styles.sendText}>↑</Text>
+          <Icon name="send" size={18} color="#001018" />
         </TouchableOpacity>
       </View>
 
@@ -254,7 +253,9 @@ export default function AICoachScreen({ transactions, scores }: Props) {
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Chat History</Text>
-              <TouchableOpacity onPress={() => setShowHistory(false)}><Text style={styles.closeButton}>✕</Text></TouchableOpacity>
+              <TouchableOpacity onPress={() => setShowHistory(false)} style={{ padding: 8 }}>
+                <Icon name="close" size={22} color={C.textSecondary} />
+              </TouchableOpacity>
             </View>
             {sessions.length === 0 ? (
               <Text style={{ color: C.textSecondary, textAlign: 'center', marginTop: 40 }}>No past chats yet.</Text>
@@ -282,13 +283,19 @@ export default function AICoachScreen({ transactions, scores }: Props) {
 
 const styles = StyleSheet.create({
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, paddingHorizontal: 4 },
-  headerButton: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(255,255,255,0.05)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 12 },
-  headerButtonText: { color: C.accent, fontSize: 12, fontWeight: '700' },
-  headerTitle: { color: C.textPrimary, fontSize: 22, fontWeight: '700', letterSpacing: -0.3 },
-  emptyStateBubble: { backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderRadius: 18, borderBottomLeftRadius: 4, padding: 16, maxWidth: '90%' },
-  emptyStateText: { color: C.textPrimary, fontSize: 14, lineHeight: 21 },
-  cardHeaderTitle: { color: C.textSecondary, fontSize: 11, fontWeight: '700', letterSpacing: 1.5 },
-  suggestedChip: { borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', backgroundColor: 'rgba(56,189,248,0.08)', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 16, marginBottom: 10, alignSelf: 'flex-start' },
+  iconButton: { padding: 8 },
+  headerTitle: { color: C.textPrimary, fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
+
+  // Empty State
+  emptyStateContainer: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 30 },
+  emptyStateAvatar: { width: 80, height: 80, borderRadius: 40, backgroundColor: 'rgba(56,189,248,0.1)', borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  emptyStateTitle: { color: C.textPrimary, fontSize: 20, fontWeight: '800', marginBottom: 8 },
+  emptyStateText: { color: C.textSecondary, fontSize: 14, lineHeight: 21, textAlign: 'center', marginBottom: 30 },
+
+  // Suggestions
+  suggestionsWrapper: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 8 },
+  suggestedChip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)', backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 980, paddingVertical: 10, paddingHorizontal: 14 },
+  suggestedChipText: { color: C.textPrimary, fontSize: 13, fontWeight: '600' },
   suggestedChipText: { color: C.accent, fontSize: 13 },
   messageBubble: { maxWidth: '85%', padding: 14, borderRadius: 16, marginBottom: 12, flexShrink: 1 },
   userBubble: { backgroundColor: C.accent, alignSelf: 'flex-end', borderBottomRightRadius: 4 },
@@ -297,8 +304,7 @@ const styles = StyleSheet.create({
   aiText: { color: C.textPrimary, fontSize: 14, lineHeight: 20 },
   loadingContainer: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, marginBottom: 12 },
   loadingText: { color: C.textSecondary, fontSize: 12, marginLeft: 8, fontStyle: 'italic' },
-  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 8, marginBottom: 100 },
-  input: { flex: 1, color: C.textPrimary, fontSize: 14, maxHeight: 80, paddingVertical: 8 },
+  inputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderRadius: 24, paddingHorizontal: 16, paddingVertical: 8, marginBottom: 90 },  input: { flex: 1, color: C.textPrimary, fontSize: 14, maxHeight: 80, paddingVertical: 8 },
   sendButton: { width: 36, height: 36, borderRadius: 18, backgroundColor: C.accent, justifyContent: 'center', alignItems: 'center', marginLeft: 8 },
   sendText: { color: '#001018', fontSize: 20, fontWeight: 'bold' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'flex-end' },
