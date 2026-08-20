@@ -598,9 +598,21 @@ export default function App() {
   const loadSavedData = async () => {
     try {
       const raw = await SmsModule.loadData(STORAGE_KEY);
-      if (!raw) return null;
+      if (!raw) {
+        // If it's the user's first launch, default them to Liberal Mode
+        setMode('liberal');
+        await saveState({ mode: 'liberal' });
+        return null;
+      }
       const parsed = JSON.parse(raw);
-      if (parsed.mode) setMode(parsed.mode);
+      // FIX: If old data has no mode, default to liberal
+      if (!parsed.mode) {
+        parsed.mode = 'liberal';
+        setMode('liberal');
+        await saveState({ mode: 'liberal' }); // Save it so it doesn't happen again
+      } else {
+        setMode(parsed.mode);
+      }
       if (parsed.userLabels) setUserLabels(parsed.userLabels);
       if (parsed.labeledTxnIds) setLabeledTxnIds(parsed.labeledTxnIds);
       if (parsed.worthItTxnIds) setWorthItTxnIds(parsed.worthItTxnIds);
@@ -666,6 +678,11 @@ export default function App() {
         granted[PermissionsAndroid.PERMISSIONS.RECEIVE_SMS] === PermissionsAndroid.RESULTS.GRANTED
       ) {
         setHasPermission(true);
+        // FIX: Default to Liberal Mode if they don't have one set yet
+        if (!mode) {
+          setMode('liberal');
+          await saveState({ mode: 'liberal' });
+        }
         fetchSMS(savedStateRef.current);
       } else {
         Alert.alert("Permission Denied", "Q cannot function without SMS access. Exiting.");
@@ -1023,26 +1040,7 @@ export default function App() {
   if (!mode) {
     return (
       <View style={styles.darkContainer}>
-      <StatusBar barStyle="light-content" />
-        <View style={styles.onboardingContent}>
-          <Text style={styles.logo}>Choose your style</Text>
-          <Text style={styles.onboardingSubtext}>How do you want Q to analyze your spending?</Text>
-          <TouchableOpacity style={[styles.modeCard, { borderColor: 'rgba(239,68,68,0.4)' }]} activeOpacity={0.85} onPress={() => { setMode('strict'); saveState({ mode: 'strict' }); }}>
-            <Text style={styles.modeTitle}>Strict Mode</Text>
-            <Text style={styles.modeText}>Judges spending against standard population benchmarks. No excuses, pure math.</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.modeCard, { borderColor: 'rgba(16,185,129,0.4)' }]}
-            activeOpacity={0.85}
-            onPress={() => {
-              setMode('liberal');
-              saveState({ mode: 'liberal' });
-            }}
-          >
-            <Text style={styles.modeTitle}>Liberal Mode 🔒</Text>
-            <Text style={styles.modeText}>If you're happy with a purchase, we exclude it from your impulsivity score. You define your own discipline.</Text>
-          </TouchableOpacity>
-        </View>
+        <ActivityIndicator color={C.accent} size="large" style={{ marginTop: 100 }} />
       </View>
     );
   }
