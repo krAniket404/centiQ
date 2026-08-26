@@ -87,6 +87,10 @@ export default function App() {
   const [morningQuote, setMorningQuote] = useState<string | null>(null);
   const [showWowModal, setShowWowModal] = useState(false);
   const [manualCategories, setManualCategories] = useState<{[key: string]: string}>({});
+  const [emergencyTxnIds, setEmergencyTxnIds] = useState<string[]>([]);
+  const [showEmergencyModal, setShowEmergencyModal] = useState(false);
+  const [emergencyTxnId, setEmergencyTxnId] = useState<string | null>(null);
+  const [emergencyReason, setEmergencyReason] = useState('');
 
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
@@ -123,44 +127,6 @@ export default function App() {
   ]).current;
 
   // --- ALL HOOKS MUST BE HERE, AT THE TOP LEVEL ---
-
-  // Schedule Daily Behavioral Reminders
-  useEffect(() => {
-    if (scores.wellness > 0 && Array.isArray(transactions) && transactions.length > 0) {
-      const now = new Date();
-      const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-      const dayOfMonth = now.getDate();
-      const daysLeft = Math.max(daysInMonth - dayOfMonth, 1);
-
-      const spentSoFar = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
-      const monthlyIncome = transactions.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
-      const remaining = monthlyIncome - spentSoFar;
-      const dailyAllowance = remaining > 0 ? Math.round(remaining / daysLeft) : 0;
-
-      // 1. 8:00 AM - Daily Allowance Reminder
-      const morningMsg = dailyAllowance > 0
-        ? `You have ₹${dailyAllowance.toLocaleString('en-IN')} left to spend today.`
-        : `You are over budget. Try to minimize spending today.`;
-
-      // Append the daily quote to the notification
-      const fullNotificationMsg = dailyQuote
-        ? `${morningMsg}\n\n💬 "${dailyQuote}"`
-        : morningMsg;
-
-      SmsModule.scheduleDailyReminder(8, 0, "Q Daily Check-in", fullNotificationMsg)
-        .catch((e: any) => console.warn("Failed to schedule morning reminder", e));
-
-      // 2. 9:00 PM - Streak Warning (Only if they have an active streak)
-      if (activeStreaks && activeStreaks.length > 0) {
-        const maxStreak = Math.max(...Object.values(streakData).map(Number));
-        if (maxStreak > 0) {
-          const nightMsg = `Don't break your ${maxStreak}-day streak! No late-night spending.`;
-          SmsModule.scheduleDailyReminder(21, 0, "Streak Warning", nightMsg)
-            .catch((e: any) => console.warn("Failed to schedule night reminder", e));
-        }
-      }
-    }
-  }, [scores, transactions, activeStreaks, streakData]);
 
   useEffect(() => {
     const animations = [
@@ -619,6 +585,7 @@ export default function App() {
       if (parsed.goals) setGoals(parsed.goals);
       if (parsed.activeStreaks) setActiveStreaks(parsed.activeStreaks);
       if (parsed.manualCategories) setManualCategories(parsed.manualCategories);
+      if (parsed.emergencyTxnIds) setEmergencyTxnIds(parsed.emergencyTxnIds);
 
       if (Array.isArray(parsed.transactions)) {
         const hydratedTxns = parsed.transactions.map((t: any) => ({
@@ -647,6 +614,7 @@ export default function App() {
       scores: overrides.scores ?? scores,
       activeStreaks: overrides.activeStreaks ?? activeStreaks,
       manualCategories: overrides.manualCategories ?? manualCategories,
+      emergencyTxnIds: overrides.emergencyTxnIds ?? emergencyTxnIds,
     };
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
@@ -760,7 +728,7 @@ export default function App() {
 
       const worthIt = saved?.worthItTxnIds ?? worthItTxnIds;
       const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!));
-
+      const emergencies = saved?.emergencyTxnIds ?? emergencyTxnIds;
       const discipline = calculateDisciplineScore(debitTxns);
       const impulse = calculateImpulseIndex(liberalTxns, monthlyCredit);
       const volatility = calculateVolatilityScore(debitTxns);
@@ -947,6 +915,24 @@ export default function App() {
     await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
   };
 
+  const handleEmergencyOverride = () => {
+    if (!emergencyTxnId) return;
+    const updated = [...emergencyTxnIds, emergencyTxnId];
+    setEmergencyTxnIds(updated);
+    saveState({ emergencyTxnIds: updated });
+
+    const debitTxns = transactions.filter(t => t.type === 'debit');
+    const newLiberalTxns = debitTxns.filter(t => !worthItTxnIds.includes(t.id!) && !updated.includes(t.id!));
+    const newImpulse = calculateImpulseIndex(newLiberalTxns, monthlyCredit);
+    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
+    setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
+
+    setEmergencyTxnId(null);
+    setEmergencyReason('');
+    setShowEmergencyModal(false);
+    Vibration.vibrate(30);
+  };
+
   const handleAddGoal = () => {
     if (!newGoalName || !newGoalTarget) {
       Alert.alert("Error", "Please enter a goal name and target amount.");
@@ -1073,6 +1059,9 @@ return (
               {/* Header */}
               <View style={styles.headerRow}>
                 <View>
+                  <TouchableOpacity onPress={() => { setEmergencyTxnId('test_emergency_123'); setShowEmergencyModal(true); }} style={{ backgroundColor: '#EF4444', padding: 8, borderRadius: 8, marginBottom: 10 }}>
+                    <Text style={{ color: '#FFF', fontSize: 12 }}>Test Emergency Modal</Text>
+                  </TouchableOpacity>
                   <Text style={styles.greeting}>
                     {(() => {
                       const h = new Date().getHours();
@@ -1921,6 +1910,39 @@ return (
           <Text style={[styles.tabLabel, { color: activeTab === 'settings' ? C.accent : C.textSecondary }]}>More</Text>
           {activeTab === 'settings' && <View style={styles.activeDot} />}
         </TouchableOpacity>
+      {showEmergencyModal && (
+        <Modal transparent animationType="fade" visible={showEmergencyModal}>
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.8)', justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+            <View style={{ backgroundColor: '#121212', borderRadius: 24, padding: 28, width: '100%', borderWidth: 1, borderColor: 'rgba(255,255,255,0.1)' }}>
+              <Text style={{ color: '#EF4444', fontSize: 18, fontWeight: '800', marginBottom: 8 }}>EMERGENCY OVERRIDE</Text>
+              <Text style={{ color: '#A0A0B0', fontSize: 14, marginBottom: 20 }}>
+                Q won't count this against your behavioral scores or streaks.
+              </Text>
+              <TextInput
+                placeholder="Brief reason (e.g., Medical, Repair)"
+                placeholderTextColor="#555"
+                value={emergencyReason}
+                onChangeText={setEmergencyReason}
+                style={{ backgroundColor: 'rgba(255,255,255,0.05)', borderRadius: 12, padding: 14, color: '#FFF', fontSize: 15, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)' }}
+              />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
+                <TouchableOpacity
+                  onPress={() => { setShowEmergencyModal(false); setEmergencyTxnId(null); }}
+                  style={{ flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 14, padding: 16, alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#A0A0B0', fontWeight: '700' }}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={handleEmergencyOverride}
+                  style={{ flex: 1, backgroundColor: '#EF4444', borderRadius: 14, padding: 16, alignItems: 'center' }}
+                >
+                  <Text style={{ color: '#FFF', fontWeight: '800' }}>Unlock</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
       </View>
     </View>
   );
