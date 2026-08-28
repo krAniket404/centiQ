@@ -14,9 +14,11 @@ interface Props {
   setMode: (mode: 'strict' | 'liberal') => void;
   resetAppData: () => void;
   userLabels: any[];
+  pinnedFeatures: string[];
+  togglePin: (id: string) => void;
 }
 
-export default function SettingsScreen({ mode, setMode, resetAppData, userLabels }: Props) {
+export default function SettingsScreen({ mode, setMode, resetAppData, userLabels, pinnedFeatures, togglePin }: Props) {
   const handleClearData = () => {
     Alert.alert(
       "Clear App Data",
@@ -70,6 +72,43 @@ export default function SettingsScreen({ mode, setMode, resetAppData, userLabels
         </View>
       </View>
 
+      {/* Customize Dashboard Card */}
+      <View style={[styles.glassCard, { padding: 20, marginBottom: 16 }]}>
+        <Text style={styles.cardHeaderTitle}>CUSTOMIZE DASHBOARD</Text>
+        <Text style={styles.subtext}>Pin or unpin features to keep your focus sharp.</Text>
+
+        <View style={{ gap: 10 }}>
+          {[
+            { id: 'wellness', name: 'Wellness Score' },
+            { id: 'persona', name: 'Financial Persona' },
+            { id: 'streaks', name: 'Discipline Streaks' },
+            { id: 'vault', name: '24-Hour Rule' },
+            { id: 'heatmap', name: 'Behavior Map' },
+            { id: 'subs', name: 'Subscription Audit' },
+            { id: 'repetitive', name: 'Repetitive Payments' },
+            { id: 'feed', name: 'AI Behavior Feed' },
+            { id: 'forecast', name: 'Spend Forecast' },
+            { id: 'goals', name: 'Savings Vault' },
+            { id: 'chart', name: 'Weekly Chart' }
+          ].map(feature => (
+            <TouchableOpacity
+              key={feature.id}
+              style={styles.pinRow}
+              onPress={() => togglePin(feature.id)}
+            >
+              <Text style={{ color: pinnedFeatures.includes(feature.id) ? C.textPrimary : C.textSecondary, fontSize: 13, fontWeight: '600' }}>
+                {feature.name}
+              </Text>
+              <Icon
+                name={pinnedFeatures.includes(feature.id) ? "pin" : "pin-off-outline"}
+                size={18}
+                color={pinnedFeatures.includes(feature.id) ? C.accent : C.textSecondary}
+              />
+            </TouchableOpacity>
+          ))}
+        </View>
+      </View>
+
       {/* Data Management Card */}
       <View style={[styles.glassCard, { padding: 20 }]}>
         <Text style={styles.cardHeaderTitle}>DATA & PRIVACY</Text>
@@ -104,6 +143,9 @@ const styles = StyleSheet.create({
   modeButtonActive: { backgroundColor: C.accent, shadowColor: C.accent, shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 2 } },
   modeButtonText: { color: C.textSecondary, fontSize: 13, fontWeight: '700' },
   modeButtonTextActive: { color: '#001018', fontWeight: '800' },
+
+  // Pinning
+  pinRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' },
 
   // Danger Zone
   dangerButton: { backgroundColor: 'rgba(239,68,68,0.1)', borderWidth: 1, borderColor: 'rgba(239,68,68,0.3)', paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginTop: 8 },

@@ -14,13 +14,17 @@ class SmsReceiver : BroadcastReceiver() {
         if (intent.action == Telephony.Sms.Intents.SMS_RECEIVED_ACTION) {
             val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
             val messageBody = messages.joinToString { it.displayMessageBody }
+            val lowerBody = messageBody.lowercase()
 
-            // Check if it looks like a transaction
-            if (messageBody.contains("Rs", ignoreCase = true) ||
-                messageBody.contains("INR", ignoreCase = true) ||
-                messageBody.contains("debited", ignoreCase = true) ||
-                messageBody.contains("spent", ignoreCase = true)) {
+            // 1. MUST contain a transaction keyword
+            val txnKeywords = listOf("rs", "inr", "₹", "debited", "spent", "paid", "sent", "withdrawn")
+            val hasTxnKeyword = txnKeywords.any { lowerBody.contains(it) }
 
+            // 2. ONLY notify for debit transactions (Fix #1)
+            val debitKeywords = listOf("debited", "spent", "paid", "sent", "withdrawn", "dr.")
+            val isDebit = debitKeywords.any { lowerBody.contains(it) }
+
+            if (hasTxnKeyword && isDebit) {
                 showTransactionNotification(context)
             }
         }
@@ -58,11 +62,18 @@ class SmsReceiver : BroadcastReceiver() {
             context, 1, impulsiveIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Intent to open the app (Fix #5)
+        val openAppIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val openAppPendingIntent = PendingIntent.getActivity(
+            context, 2, openAppIntent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("💸 New Transaction Detected")
             .setContentText("Was this purchase impulsive? Log it for your ML model.")
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(openAppPendingIntent)
             .setAutoCancel(true)
             // Add the Action Buttons
             .addAction(0, "✅ Worth it", worthItPendingIntent)

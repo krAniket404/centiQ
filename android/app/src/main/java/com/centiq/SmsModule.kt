@@ -29,12 +29,34 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
     @ReactMethod
     fun openNotificationSettings() {
         try {
-            val intent = android.content.Intent("android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS")
+            val intent = android.content.Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
             intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
             reactApplicationContext.startActivity(intent)
         } catch (e: Exception) {
             // Fallback just in case
         }
+    }
+
+    @ReactMethod
+    fun isNotificationServiceEnabled(promise: Promise) {
+        val pkgName = reactApplicationContext.packageName
+        val flat = android.provider.Settings.Secure.getString(
+            reactApplicationContext.contentResolver,
+            "enabled_notification_listeners"
+        )
+        if (!android.text.TextUtils.isEmpty(flat)) {
+            val names = flat.split(":".toRegex()).dropLastWhile { it.isEmpty() }.toTypedArray()
+            for (i in names.indices) {
+                val cn = android.content.ComponentName.unflattenFromString(names[i])
+                if (cn != null) {
+                    if (android.text.TextUtils.equals(pkgName, cn.packageName)) {
+                        promise.resolve(true)
+                        return
+                    }
+                }
+            }
+        }
+        promise.resolve(false)
     }
 
     @ReactMethod
@@ -204,6 +226,55 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
             promise.resolve("Scheduled")
         } catch (e: Exception) {
             promise.reject("SCHEDULE_ERROR", e)
+        }
+    }
+
+    @ReactMethod
+    fun scheduleRepeatingNotification(id: String, intervalHours: Double, title: String, message: String, promise: Promise) {
+        try {
+            val context = reactApplicationContext
+            val intent = Intent(context, DailyReminderReceiver::class.java).apply {
+                action = "com.centiq.REPEATING_REMINDER"
+                putExtra("id", id)
+                putExtra("title", title)
+                putExtra("message", message)
+            }
+
+            val pendingIntent = PendingIntent.getBroadcast(
+                context, id.hashCode(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            val intervalMillis = (intervalHours * 60 * 60 * 1000).toLong()
+
+            alarmManager.setInexactRepeating(
+                android.app.AlarmManager.RTC_WAKEUP,
+                System.currentTimeMillis() + intervalMillis,
+                intervalMillis,
+                pendingIntent
+            )
+            promise.resolve("Scheduled Repeating")
+        } catch (e: Exception) {
+            promise.reject("REPEATING_SCHEDULE_ERROR", e)
+        }
+    }
+
+    @ReactMethod
+    fun cancelNotification(id: String, promise: Promise) {
+        try {
+            val context = reactApplicationContext
+            val intent = Intent(context, DailyReminderReceiver::class.java)
+            val pendingIntent = PendingIntent.getBroadcast(
+                context, id.hashCode(), intent, PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (pendingIntent != null) {
+                val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+                alarmManager.cancel(pendingIntent)
+                pendingIntent.cancel()
+            }
+            promise.resolve("Cancelled")
+        } catch (e: Exception) {
+            promise.reject("CANCEL_ERROR", e)
         }
     }
 }

@@ -81,8 +81,14 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   }
 
   // Clean up trailing periods, semicolons, and common garbage words
-  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN|WWW|COM|NOT YOU|SMS BLOCK)\b/g, '').trim();
+  merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN|WWW|COM|NOT YOU|SMS BLOCK|INFO|YOUR|NOTIF|TXN|TRF|TRANSFER)\b/g, '').trim();
   merchant = merchant.replace(/[;:\.]+$/, '').trim(); // Remove trailing semicolons, colons, periods
+
+  // PSU Bank Special Handling (Canara, SBI, PNB often have specific strings)
+  if (merchant.includes('VPA')) {
+      const vpaMatch = cleanBody.match(/VPA\s+([A-Za-z0-9\s]+?)(?=\s|;|\.|$)/i);
+      if (vpaMatch) merchant = vpaMatch[1].trim().toUpperCase();
+  }
 
   if (merchant.length < 3) merchant = 'Unknown';
 
@@ -94,6 +100,9 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   else if (upperBody.includes('KOTAK')) bank = 'KOTAK';
   else if (upperBody.includes('INDIAN BANK')) bank = 'Indian Bank';
   else if (upperBody.includes('CANARA')) bank = 'Canara Bank';
+  else if (upperBody.includes('PNB') || upperBody.includes('PUNJAB NATIONAL')) bank = 'PNB';
+  else if (upperBody.includes('BOB') || upperBody.includes('BARODA')) bank = 'Bank of Baroda';
+  else if (upperBody.includes('UNION BANK')) bank = 'Union Bank';
 
   const date = new Date(smsDate);
   return { amount, date, bank, raw: smsBody, type, merchant };

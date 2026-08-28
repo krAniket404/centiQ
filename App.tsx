@@ -91,11 +91,13 @@ export default function App() {
   const [showEmergencyModal, setShowEmergencyModal] = useState(false);
   const [emergencyTxnId, setEmergencyTxnId] = useState<string | null>(null);
   const [emergencyReason, setEmergencyReason] = useState('');
+  const [pinnedFeatures, setPinnedFeatures] = useState<string[]>(['wellness', 'persona', 'streaks', 'vault', 'heatmap', 'subs', 'repetitive', 'feed', 'forecast', 'goals', 'chart']);
 
   const [morningBriefing, setMorningBriefing] = useState<string | null>(null);
   const [showBriefing, setShowBriefing] = useState(false);
   const [isFetchingBriefing, setIsFetchingBriefing] = useState(false);
   const [expandedCharge, setExpandedCharge] = useState<string | null>(null);
+  const [notifAccessEnabled, setNotifAccessEnabled] = useState<boolean>(true);
 
   // PASTE YOUR GEMINI API KEY HERE
   const API_KEY = 'YOUR_GEMINI_API_KEY';
@@ -144,6 +146,22 @@ export default function App() {
       }).start();
     });
   }, [scores]);
+
+  useEffect(() => {
+    const checkNotifAccess = async () => {
+      try {
+        const enabled = await SmsModule.isNotificationServiceEnabled();
+        setNotifAccessEnabled(enabled);
+      } catch (e) {}
+    };
+    checkNotifAccess();
+
+    // Check again when app returns to foreground
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') checkNotifAccess();
+    });
+    return () => sub.remove();
+  }, []);
 
 /*  useEffect(() => {
     // Safety check to prevent the crash
@@ -506,34 +524,84 @@ export default function App() {
     if (!Array.isArray(transactions) || transactions.length === 0) return {};
     const debitTxns = transactions.filter(t => t.type === 'debit');
     if (debitTxns.length === 0) return {};
+
     const totalSpend = debitTxns.reduce((a, b) => a + b.amount, 0);
     const avgAmt = totalSpend / debitTxns.length;
     const results: { [key: string]: number } = {};
-    (activeStreaks || ['late_night']).forEach(streakId => {
+
+    (activeStreaks || []).forEach(streakId => {
       let streak = 0;
       let checkDate = new Date();
       checkDate.setHours(0, 0, 0, 0);
-      checkDate.setDate(checkDate.getDate() - 1);
+
       while (true) {
         const dateStr = checkDate.toDateString();
-        const dayTxns = debitTxns.filter(t => new Date(t.date).toDateString() === dateStr);
+        const dayTxns = debitTxns.filter(t => t.date.toDateString() === dateStr);
+
         let broken = false;
         if (dayTxns.length > 0) {
-          if (streakId === 'late_night') broken = dayTxns.some(t => { const h = new Date(t.date).getHours(); return h >= 22 || h <= 6; });
-          else if (streakId === 'weekend') { const day = checkDate.getDay(); if (day === 0 || day === 6) broken = dayTxns.some(t => t.amount > avgAmt * 1.5); }
-          else if (streakId === 'food_delivery') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('EATS') || m.includes('PIZZA'); });
-          else if (streakId === 'online_shopping') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('AMAZON') || m.includes('FLIPKART') || m.includes('MYNTRA') || m.includes('AJIO') || m.includes('NYKAA'); });
-          else if (streakId === 'fast_food') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('MCDONALD') || m.includes('KFC') || m.includes('BURGER') || m.includes('SUBWAY') || m.includes('WENDYS'); });
-          else if (streakId === 'ride_hailing') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('UBER') || m.includes('OLA') || m.includes('RAPIDO') || m.includes('LYFT'); });
-          else if (streakId === 'coffee') broken = dayTxns.some(t => { const m = (t.merchant || '').toUpperCase(); return m.includes('STARBUCKS') || m.includes('CCD') || m.includes('CAFE') || m.includes('COFFEE') || m.includes('COSTA'); });
+          if (streakId === 'late_night') {
+            broken = dayTxns.some(t => {
+              const h = t.date.getHours();
+              return h >= 22 || h <= 6;
+            });
+          } else if (streakId === 'weekend') {
+            const day = checkDate.getDay();
+            if (day === 0 || day === 6) {
+              broken = dayTxns.some(t => t.amount > avgAmt * 1.5);
+            }
+          } else if (streakId === 'food_delivery') {
+            broken = dayTxns.some(t => {
+              const m = (t.merchant || '').toUpperCase();
+              return m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('EATS') || m.includes('PIZZA');
+            });
+          } else if (streakId === 'online_shopping') {
+            broken = dayTxns.some(t => {
+              const m = (t.merchant || '').toUpperCase();
+              return m.includes('AMAZON') || m.includes('FLIPKART') || m.includes('MYNTRA') || m.includes('AJIO') || m.includes('NYKAA');
+            });
+          } else if (streakId === 'fast_food') {
+            broken = dayTxns.some(t => {
+              const m = (t.merchant || '').toUpperCase();
+              return m.includes('MCDONALD') || m.includes('KFC') || m.includes('BURGER') || m.includes('SUBWAY') || m.includes('WENDYS');
+            });
+          } else if (streakId === 'ride_hailing') {
+            broken = dayTxns.some(t => {
+              const m = (t.merchant || '').toUpperCase();
+              return m.includes('UBER') || m.includes('OLA') || m.includes('RAPIDO') || m.includes('LYFT');
+            });
+          } else if (streakId === 'coffee') {
+            broken = dayTxns.some(t => {
+              const m = (t.merchant || '').toUpperCase();
+              return m.includes('STARBUCKS') || m.includes('CCD') || m.includes('CAFE') || m.includes('COFFEE') || m.includes('COSTA');
+            });
+          }
         }
-        if (broken) break;
-        else { streak++; checkDate.setDate(checkDate.getDate() - 1); if (streak > 365) break; }
+
+        if (broken) {
+          // If the break happened TODAY, streak is 0. If it happened before, streak is what we counted.
+          break;
+        } else {
+          // Only increment streak if this is NOT today, or if today passed with no broken rules
+          // Actually, if today has no transactions, we keep counting back.
+          streak++;
+          checkDate.setDate(checkDate.getDate() - 1);
+          if (streak > 365) break;
+        }
       }
-      results[streakId] = streak;
+      // If broken today, results[id] will be 0 because we break immediately.
+      // But we need to handle the case where streak starts from 0 for today.
+      results[streakId] = Math.max(0, streak - 1);
     });
     return results;
   }, [transactions, activeStreaks]);
+
+  const monthlySpendTotal = useMemo(() => {
+    const now = new Date();
+    return transactions
+      .filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear())
+      .reduce((sum, t) => sum + t.amount, 0);
+  }, [transactions]);
 
   // Calculate Monthly Wrap Data (Fixed to exclude "Worth It" purchases)
   const monthlyWrapData = useMemo(() => {
@@ -586,6 +654,7 @@ export default function App() {
       if (parsed.activeStreaks) setActiveStreaks(parsed.activeStreaks);
       if (parsed.manualCategories) setManualCategories(parsed.manualCategories);
       if (parsed.emergencyTxnIds) setEmergencyTxnIds(parsed.emergencyTxnIds);
+      if (parsed.pinnedFeatures) setPinnedFeatures(parsed.pinnedFeatures);
 
       if (Array.isArray(parsed.transactions)) {
         const hydratedTxns = parsed.transactions.map((t: any) => ({
@@ -615,6 +684,7 @@ export default function App() {
       activeStreaks: overrides.activeStreaks ?? activeStreaks,
       manualCategories: overrides.manualCategories ?? manualCategories,
       emergencyTxnIds: overrides.emergencyTxnIds ?? emergencyTxnIds,
+      pinnedFeatures: overrides.pinnedFeatures ?? pinnedFeatures,
     };
     try { await SmsModule.saveData(STORAGE_KEY, JSON.stringify(payload)); } catch (e) {}
   };
@@ -727,11 +797,12 @@ export default function App() {
       if (debitTxns.length === 0) return;
 
       const worthIt = saved?.worthItTxnIds ?? worthItTxnIds;
-      const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!));
       const emergencies = saved?.emergencyTxnIds ?? emergencyTxnIds;
-      const discipline = calculateDisciplineScore(debitTxns);
-      const impulse = calculateImpulseIndex(liberalTxns, monthlyCredit);
-      const volatility = calculateVolatilityScore(debitTxns);
+      const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!) && !emergencies.includes(t.id!));
+
+      const discipline = calculateDisciplineScore(debitTxns, emergencies);
+      const impulse = calculateImpulseIndex(liberalTxns, monthlyCredit, emergencies);
+      const volatility = calculateVolatilityScore(debitTxns, emergencies);
 
       const now = new Date();
       const monthlyDebit = debitTxns.filter(t => t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
@@ -796,8 +867,8 @@ export default function App() {
     model.train(updatedLabels);
 
     const debitTxns = transactions.filter(t => t.type === 'debit');
-    const liberalTxns = debitTxns.filter(t => !updatedWorthIt.includes(t.id!));
-    const newImpulse = calculateImpulseIndex(liberalTxns);
+    const liberalTxns = debitTxns.filter(t => !updatedWorthIt.includes(t.id!) && !emergencyTxnIds.includes(t.id!));
+    const newImpulse = calculateImpulseIndex(liberalTxns, 0, emergencyTxnIds);
     const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
     setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
     saveState({ userLabels: updatedLabels, labeledTxnIds: updatedLabeledIds, worthItTxnIds: updatedWorthIt });
@@ -897,6 +968,17 @@ export default function App() {
     setPendingPurchases(updated);
     // FIXED: Added SmsModule.
     await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
+
+    // Schedule 6-hour reminders (Fix #2)
+    try {
+        await SmsModule.scheduleRepeatingNotification(
+            `vault_${newPurchase.id}`,
+            6.0,
+            "Cooling Off Check-in ❄️",
+            `Do you still want to buy ${newPurchase.name}? Tap to decide.`
+        );
+    } catch (e) {}
+
     setPauseName('');
     setPauseAmount('');
     setShowPauseModal(false);
@@ -913,6 +995,11 @@ export default function App() {
     setPendingPurchases(updated);
     // FIXED: Added SmsModule.
     await SmsModule.saveData('pending_purchases', JSON.stringify(updated));
+
+    // Cancel reminders (Fix #2)
+    try {
+        await SmsModule.cancelNotification(`vault_${id}`);
+    } catch (e) {}
   };
 
   const handleEmergencyOverride = () => {
@@ -922,10 +1009,15 @@ export default function App() {
     saveState({ emergencyTxnIds: updated });
 
     const debitTxns = transactions.filter(t => t.type === 'debit');
-    const newLiberalTxns = debitTxns.filter(t => !worthItTxnIds.includes(t.id!) && !updated.includes(t.id!));
-    const newImpulse = calculateImpulseIndex(newLiberalTxns, monthlyCredit);
-    const newWellness = calculateWellnessScore(scores.discipline, newImpulse, scores.volatility);
-    setScores({ ...scores, impulse: newImpulse, wellness: newWellness });
+    const worthIt = worthItTxnIds;
+    const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!) && !updated.includes(t.id!));
+
+    const discipline = calculateDisciplineScore(debitTxns, updated);
+    const impulse = calculateImpulseIndex(liberalTxns, 0, updated);
+    const volatility = calculateVolatilityScore(debitTxns, updated);
+    const wellness = calculateWellnessScore(discipline, impulse, volatility);
+
+    setScores({ ...scores, discipline, impulse, volatility, wellness });
 
     setEmergencyTxnId(null);
     setEmergencyReason('');
@@ -962,6 +1054,19 @@ export default function App() {
     triggerHaptic(30); //Satisfying click!
   };
 
+  const togglePin = (featureId: string) => {
+    const isPinned = pinnedFeatures.includes(featureId);
+    let updated;
+    if (isPinned) {
+      updated = pinnedFeatures.filter(id => id !== featureId);
+    } else {
+      updated = [...pinnedFeatures, featureId];
+    }
+    setPinnedFeatures(updated);
+    saveState({ pinnedFeatures: updated });
+    triggerHaptic(10);
+  };
+
   // Listen for transaction notifications from the Android Service
   useEffect(() => {
     const subscription = DeviceEventEmitter.addListener('transaction_notification', (notificationText: string) => {
@@ -972,24 +1077,41 @@ export default function App() {
 
       if (parsedTxn && parsedTxn.amount > 0) {
         setTransactions(prev => {
-          // PREVENT DUPLICATES! Check if we already logged this in the last 2 minutes
+          // PREVENT DUPLICATES! (Fix #3)
+          // Check if we already logged this in the last 5 minutes (expanded window)
           const isDuplicate = prev.some(t =>
-            t.amount === parsedTxn.amount &&
-            t.merchant === parsedTxn.merchant &&
-            (Math.abs(new Date(t.date).getTime() - Date.now()) < 120000) // 2 mins
+            Math.abs(t.amount - parsedTxn.amount) < 0.01 &&
+            (t.merchant === parsedTxn.merchant || parsedTxn.raw.includes(t.merchant)) &&
+            (Math.abs(new Date(t.date).getTime() - Date.now()) < 300000) // 5 mins
           );
 
           if (!isDuplicate) {
-            const newTxn = {
+            const newTxn: ParsedTransaction = {
               ...parsedTxn,
               id: `${Date.now()}_${parsedTxn.amount}_${parsedTxn.merchant}_${parsedTxn.type}`,
               date: new Date()
             };
             const updated = [newTxn, ...prev];
 
+            // Re-calculate scores immediately for better feedback
+            const debitTxns = updated.filter(t => t.type === 'debit');
+            const monthlyCredit = updated.filter(t => t.type === 'credit' && t.date.getMonth() === new Date().getMonth()).reduce((a, b) => a + b.amount, 0);
+            const worthIt = worthItTxnIds;
+            const emergencies = emergencyTxnIds;
+            const liberalTxns = debitTxns.filter(t => !worthIt.includes(t.id!) && !emergencies.includes(t.id!));
+
+            const discipline = calculateDisciplineScore(debitTxns, emergencies);
+            const impulse = calculateImpulseIndex(liberalTxns, monthlyCredit, emergencies);
+            const volatility = calculateVolatilityScore(debitTxns, emergencies);
+            const wellness = calculateWellnessScore(discipline, impulse, volatility);
+
+            setScores(prevScores => ({ ...prevScores, discipline, impulse, volatility, wellness }));
+
             // Save to storage immediately
-            saveState({ transactions: updated });
-            // Sync to Supabase
+            saveState({
+                transactions: updated,
+                scores: { discipline, impulse, volatility, wellness, savingsRate: scores.savingsRate }
+            });
             syncToCloud([newTxn]);
             return updated;
           }
@@ -1071,6 +1193,9 @@ return (
                       return 'Working late?';
                     })()}
                   </Text>
+                  <Text style={{ color: C.textPrimary, fontSize: 13, fontWeight: '700', marginTop: 2 }}>
+                    MONTH SPEND: <Text style={{ color: C.accent }}>₹{monthlySpendTotal.toLocaleString('en-IN')}</Text>
+                  </Text>
                 </View>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                   <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowMonthlyWrap(true)}>
@@ -1084,211 +1209,281 @@ return (
                 </View>
               </View>
 
+              {!notifAccessEnabled && (
+                <TouchableOpacity
+                    onPress={requestNotificationAccess}
+                    style={{ backgroundColor: 'rgba(56,189,248,0.1)', padding: 16, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', flexDirection: 'row', alignItems: 'center', gap: 12 }}
+                >
+                    <Icon name="bell-ring-outline" size={24} color={C.accent} />
+                    <View style={{ flex: 1 }}>
+                        <Text style={{ color: C.textPrimary, fontSize: 14, fontWeight: '700' }}>Enable Smart Tracking</Text>
+                        <Text style={{ color: C.textSecondary, fontSize: 12 }}>Capture transactions from GPay, PhonePe & more.</Text>
+                    </View>
+                    <Icon name="chevron-right" size={20} color={C.textSecondary} />
+                </TouchableOpacity>
+              )}
+
               {/* Financial Wellness Card */}
-              <WellnessCard scores={scores} />
+              {pinnedFeatures.includes('wellness') && (
+                <View>
+                  <TouchableOpacity
+                    onPress={() => togglePin('wellness')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <WellnessCard scores={scores} />
+                </View>
+              )}
 
               {/* Financial Persona Card */}
-              <View style={[styles.glassCardHeavy, { padding: 20, marginBottom: 14, flexDirection: 'row', alignItems: 'center' }]}>
-                <View style={[
-                  styles.personaIconBadge,
-                  {
-                    backgroundColor: `${behavioralProfile.persona.color}20`,
-                    borderColor: `${behavioralProfile.persona.color}50`,
-                    shadowColor: behavioralProfile.persona.color,
-                  },
-                ]}>
-                  <Icon name={behavioralProfile.persona.icon} size={28} color={behavioralProfile.persona.color} />
+              {pinnedFeatures.includes('persona') && (
+                <View style={[styles.glassCardHeavy, { padding: 20, marginBottom: 14, flexDirection: 'row', alignItems: 'center' }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('persona')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <View style={[
+                    styles.personaIconBadge,
+                    {
+                      backgroundColor: `${behavioralProfile.persona.color}20`,
+                      borderColor: `${behavioralProfile.persona.color}50`,
+                      shadowColor: behavioralProfile.persona.color,
+                    },
+                  ]}>
+                    <Icon name={behavioralProfile.persona.icon} size={28} color={behavioralProfile.persona.color} />
+                  </View>
+                  <View style={{ flex: 1, marginLeft: 14 }}>
+                    <Text style={styles.personaLabel}>YOUR FINANCIAL PERSONA</Text>
+                    <Text style={[styles.personaName, { color: behavioralProfile.persona.color }]}>{behavioralProfile.persona.name}</Text>
+                    <Text style={styles.personaDesc}>{behavioralProfile.persona.desc}</Text>
+                  </View>
                 </View>
-                <View style={{ flex: 1, marginLeft: 14 }}>
-                  <Text style={styles.personaLabel}>YOUR FINANCIAL PERSONA</Text>
-                  <Text style={[styles.personaName, { color: behavioralProfile.persona.color }]}>{behavioralProfile.persona.name}</Text>
-                  <Text style={styles.personaDesc}>{behavioralProfile.persona.desc}</Text>
-                </View>
-              </View>
+              )}
 
               {/* Dynamic Discipline Streaks Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Icon name="fire" size={16} color={C.warning} />
-                    <Text style={styles.cardHeaderTitle}>DISCIPLINE STREAKS</Text>
-                  </View>
-                  <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowStreakModal(true)}>
-                    <Text style={styles.wrapButtonText}>Manage</Text>
+              {pinnedFeatures.includes('streaks') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('streaks')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
                   </TouchableOpacity>
-                </View>
-
-                {activeStreaks.length === 0 ? (
-                  <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
-                    No habits selected. Tap "Manage" to choose which bad habits you want to break!
-                  </Text>
-                ) : (
-                  activeStreaks.map(id => {
-                    const config = {
-                      late_night: { icon: 'weather-night', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
-                      weekend: { icon: 'party-popper', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
-                      food_delivery: { icon: 'food-apple-outline', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
-                      online_shopping: { icon: 'shopping-outline', name: 'Online Shopping', desc: 'No Amazon/Flipkart' }
-                    }[id];
-
-                    if (!config) return null;
-
-                    return (
-                      <View key={id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                        <View style={[styles.insightIconBadge, { backgroundColor: `${C.warning}20`, marginRight: 12 }]}>
-                           <Icon name={config.icon} size={16} color={C.warning} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700' }}>{streakData[id] || 0} Days</Text>
-                          <Text style={{ color: C.textSecondary, fontSize: 12 }}>{config.name}</Text>
-                        </View>
-                        <Text style={{ color: C.textSecondary, fontSize: 11, textAlign: 'right', flex: 0.5 }}>{config.desc}</Text>
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-
-              {/* The 24-Hour Rule Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Icon name="timer-sand" size={16} color={C.accent} />
-                    <Text style={styles.cardHeaderTitle}>THE 24-HOUR RULE</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Icon name="fire" size={16} color={C.warning} />
+                      <Text style={styles.cardHeaderTitle}>DISCIPLINE STREAKS</Text>
+                    </View>
+                    <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowStreakModal(true)}>
+                      <Text style={styles.wrapButtonText}>Manage</Text>
+                    </TouchableOpacity>
                   </View>
-                  <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowPauseModal(true)}>
-                    <Text style={styles.wrapButtonText}>+ Add</Text>
-                  </TouchableOpacity>
-                </View>
 
-                {pendingPurchases.length === 0 ? (
-                  <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
-                    Want to buy something? Add it here instead of buying it instantly. If you still want it in 24 hours, go for it!
-                  </Text>
-                ) : (
-                  pendingPurchases.map(p => {
-                    const timeLeft = p.unlockTime - Date.now();
-                    const isUnlocked = timeLeft <= 0;
-                    const hoursLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60)));
-
-                    return (
-                      <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
-                        <View style={{ flex: 1, marginRight: 12 }}>
-                          <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{p.name}</Text>
-                          <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 2 }}>
-                            {isUnlocked ? 'Timer up! Did you buy it?' : `${hoursLeft}h left to decide`}
-                          </Text>
-                        </View>
-                        {isUnlocked ? (
-                          <View style={{ flexDirection: 'row', gap: 8 }}>
-                            <TouchableOpacity onPress={() => resolvePurchase(p.id, true)} style={{ backgroundColor: 'rgba(16,185,129,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                              <Text style={{ color: C.success, fontSize: 11, fontWeight: '700' }}>Bought</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity onPress={() => resolvePurchase(p.id, false)} style={{ backgroundColor: 'rgba(239,68,68,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
-                              <Text style={{ color: C.danger, fontSize: 11, fontWeight: '700' }}>Resisted</Text>
-                            </TouchableOpacity>
-                          </View>
-                        ) : (
-                          <Icon name="lock" size={22} color={C.accent} />
-                        )}
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-
-              {/* Behavioral Heatmap */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
-                  <Text style={styles.cardHeaderTitle}>30-DAY BEHAVIOR MAP</Text>
-                  {activeHeatmapDay !== null && behavioralProfile.heatmap[activeHeatmapDay] ? (
-                    <Text style={styles.heatmapSelectedText}>
-                      {behavioralProfile.heatmap[activeHeatmapDay].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ₹{Math.round(behavioralProfile.heatmap[activeHeatmapDay].amount).toLocaleString('en-IN')}
+                  {activeStreaks.length === 0 ? (
+                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
+                      No habits selected. Tap "Manage" to choose which bad habits you want to break!
                     </Text>
                   ) : (
-                    <Text style={styles.heatmapSelectedText}>Tap a day</Text>
+                    activeStreaks.map(id => {
+                      const config = {
+                        late_night: { icon: 'weather-night', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
+                        weekend: { icon: 'party-popper', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
+                        food_delivery: { icon: 'food-apple-outline', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
+                        online_shopping: { icon: 'shopping-outline', name: 'Online Shopping', desc: 'No Amazon/Flipkart' }
+                      }[id];
+
+                      if (!config) return null;
+
+                      return (
+                        <View key={id} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                          <View style={[styles.insightIconBadge, { backgroundColor: `${C.warning}20`, marginRight: 12 }]}>
+                             <Icon name={config.icon} size={16} color={C.warning} />
+                          </View>
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '700' }}>{streakData[id] || 0} Days</Text>
+                            <Text style={{ color: C.textSecondary, fontSize: 12 }}>{config.name}</Text>
+                          </View>
+                          <Text style={{ color: C.textSecondary, fontSize: 11, textAlign: 'right', flex: 0.5 }}>{config.desc}</Text>
+                        </View>
+                      );
+                    })
                   )}
                 </View>
+              )}
 
-                <View style={styles.heatmapGrid}>
-                  {behavioralProfile.heatmap.map((day, i) => {
-                    let bgColor = 'rgba(255,255,255,0.05)';
-                    if (day.amount > 0 && !day.isImpulsive) bgColor = 'rgba(56,189,248,0.3)';
-                    if (day.amount > 0 && day.isImpulsive) bgColor = C.danger;
-                    const isSelected = activeHeatmapDay === i;
+              {/* The 24-Hour Rule Card */}
+              {pinnedFeatures.includes('vault') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('vault')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Icon name="timer-sand" size={16} color={C.accent} />
+                      <Text style={styles.cardHeaderTitle}>THE 24-HOUR RULE</Text>
+                    </View>
+                    <TouchableOpacity style={styles.wrapButton} activeOpacity={0.8} onPress={() => setShowPauseModal(true)}>
+                      <Text style={styles.wrapButtonText}>+ Add</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                    return (
-                      <TouchableOpacity
-                        key={i}
-                        activeOpacity={0.75}
-                        onPress={() => setActiveHeatmapDay(activeHeatmapDay === i ? null : i)}
-                        style={[
-                          styles.heatmapCell,
-                          { backgroundColor: bgColor },
-                          isSelected && {
-                            borderWidth: 1.5, borderColor: '#FFFFFF',
-                            shadowColor: '#FFFFFF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 6, elevation: 4,
-                          },
-                        ]}
-                      />
-                    );
-                  })}
+                  {pendingPurchases.length === 0 ? (
+                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
+                      Want to buy something? Add it here instead of buying it instantly. If you still want it in 24 hours, go for it!
+                    </Text>
+                  ) : (
+                    pendingPurchases.map(p => {
+                      const timeLeft = p.unlockTime - Date.now();
+                      const isUnlocked = timeLeft <= 0;
+                      const hoursLeft = Math.max(0, Math.ceil(timeLeft / (1000 * 60 * 60)));
+
+                      return (
+                        <View key={p.id} style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(255,255,255,0.05)' }}>
+                          <View style={{ flex: 1, marginRight: 12 }}>
+                            <Text style={{ color: C.textPrimary, fontSize: 15, fontWeight: '600' }}>{p.name}</Text>
+                            <Text style={{ color: C.textSecondary, fontSize: 12, marginTop: 2 }}>
+                              {isUnlocked ? 'Timer up! Did you buy it?' : `${hoursLeft}h left to decide`}
+                            </Text>
+                          </View>
+                          {isUnlocked ? (
+                            <View style={{ flexDirection: 'row', gap: 8 }}>
+                              <TouchableOpacity onPress={() => resolvePurchase(p.id, true)} style={{ backgroundColor: 'rgba(16,185,129,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                                <Text style={{ color: C.success, fontSize: 11, fontWeight: '700' }}>Bought</Text>
+                              </TouchableOpacity>
+                              <TouchableOpacity onPress={() => resolvePurchase(p.id, false)} style={{ backgroundColor: 'rgba(239,68,68,0.15)', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8 }}>
+                                <Text style={{ color: C.danger, fontSize: 11, fontWeight: '700' }}>Resisted</Text>
+                              </TouchableOpacity>
+                            </View>
+                          ) : (
+                            <Icon name="lock" size={22} color={C.accent} />
+                          )}
+                        </View>
+                      );
+                    })
+                  )}
                 </View>
+              )}
 
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
-                  <Text style={styles.heatmapLegend}>Less</Text>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                    <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: 'rgba(255,255,255,0.05)' }]} />
-                    <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: 'rgba(56,189,248,0.3)' }]} />
-                    <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: C.danger }]} />
-                    <Text style={styles.heatmapLegend}>More / Impulsive</Text>
+              {/* Behavioral Heatmap */}
+              {pinnedFeatures.includes('heatmap') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('heatmap')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                    <Text style={styles.cardHeaderTitle}>30-DAY BEHAVIOR MAP</Text>
+                    {activeHeatmapDay !== null && behavioralProfile.heatmap[activeHeatmapDay] ? (
+                      <Text style={styles.heatmapSelectedText}>
+                        {behavioralProfile.heatmap[activeHeatmapDay].date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}: ₹{Math.round(behavioralProfile.heatmap[activeHeatmapDay].amount).toLocaleString('en-IN')}
+                      </Text>
+                    ) : (
+                      <Text style={styles.heatmapSelectedText}>Tap a day</Text>
+                    )}
+                  </View>
+
+                  <View style={styles.heatmapGrid}>
+                    {behavioralProfile.heatmap.map((day, i) => {
+                      let bgColor = 'rgba(255,255,255,0.05)';
+                      if (day.amount > 0 && !day.isImpulsive) bgColor = 'rgba(56,189,248,0.3)';
+                      if (day.amount > 0 && day.isImpulsive) bgColor = C.danger;
+                      const isSelected = activeHeatmapDay === i;
+
+                      return (
+                        <TouchableOpacity
+                          key={i}
+                          activeOpacity={0.75}
+                          onPress={() => setActiveHeatmapDay(activeHeatmapDay === i ? null : i)}
+                          style={[
+                            styles.heatmapCell,
+                            { backgroundColor: bgColor },
+                            isSelected && {
+                              borderWidth: 1.5, borderColor: '#FFFFFF',
+                              shadowColor: '#FFFFFF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.6, shadowRadius: 6, elevation: 4,
+                            },
+                          ]}
+                        />
+                      );
+                    })}
+                  </View>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 12 }}>
+                    <Text style={styles.heatmapLegend}>Less</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: 'rgba(255,255,255,0.05)' }]} />
+                      <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: 'rgba(56,189,248,0.3)' }]} />
+                      <View style={[styles.heatmapCell, { width: 10, height: 10, backgroundColor: C.danger }]} />
+                      <Text style={styles.heatmapLegend}>More / Impulsive</Text>
+                    </View>
                   </View>
                 </View>
-              </View>
+              )}
 
               {/* Digital Subscriptions Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14, borderColor: 'rgba(56,189,248,0.22)' }]}>
-                <View style={styles.cardTopRow}>
-                  <View style={styles.cardTitleWithIcon}>
-                    <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)' }]}>
-                      <Icon name="movie-open-outline" size={16} color={C.accent} />
+              {pinnedFeatures.includes('subs') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14, borderColor: 'rgba(56,189,248,0.22)' }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('subs')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <View style={styles.cardTopRow}>
+                    <View style={styles.cardTitleWithIcon}>
+                      <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)' }]}>
+                        <Icon name="movie-open-outline" size={16} color={C.accent} />
+                      </View>
+                      <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>SUBSCRIPTIONS</Text>
                     </View>
-                    <Text style={[styles.cardHeaderTitle, { marginBottom: 0, color: C.accent }]}>SUBSCRIPTIONS</Text>
+                    {recurringCharges.knownSubscriptions.length > 0 && (
+                      <Text style={styles.cardTopRowValue}>₹{recurringCharges.totalSubsCost.toLocaleString('en-IN')}/mo</Text>
+                    )}
                   </View>
-                  {recurringCharges.knownSubscriptions.length > 0 && (
-                    <Text style={styles.cardTopRowValue}>₹{recurringCharges.totalSubsCost.toLocaleString('en-IN')}/mo</Text>
+
+                  {recurringCharges.knownSubscriptions.length === 0 ? (
+                    <View style={{ alignItems: 'center', paddingVertical: 14 }}>
+                      <Icon name="check-circle-outline" size={32} color={C.success} style={{ marginBottom: 8 }} />
+                      <Text style={{ color: C.success, fontSize: 13.5, fontWeight: '700', marginBottom: 6, letterSpacing: 0.4 }}>NO SUBSCRIPTION LEAKS</Text>
+                      <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
+                        Great job! We didn't find any sneaky digital subscriptions in your history. Keep it up!
+                      </Text>
+                    </View>
+                  ) : (
+                    <>
+                      <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
+                        You have {recurringCharges.knownSubscriptions.length} active digital subscriptions.
+                      </Text>
+                      {recurringCharges.knownSubscriptions.map((l, i) => (
+                        <View key={i} style={styles.leakRow}>
+                          <View>
+                            <Text style={styles.leakMerchant}>{l.merchant}</Text>
+                            <Text style={styles.leakCount}>Charged {l.count} times</Text>
+                          </View>
+                          <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
+                        </View>
+                      ))}
+                    </>
                   )}
                 </View>
-
-                {recurringCharges.knownSubscriptions.length === 0 ? (
-                  <View style={{ alignItems: 'center', paddingVertical: 14 }}>
-                    <Icon name="check-circle-outline" size={32} color={C.success} style={{ marginBottom: 8 }} />
-                    <Text style={{ color: C.success, fontSize: 13.5, fontWeight: '700', marginBottom: 6, letterSpacing: 0.4 }}>NO SUBSCRIPTION LEAKS</Text>
-                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', lineHeight: 19 }}>
-                      Great job! We didn't find any sneaky digital subscriptions in your history. Keep it up!
-                    </Text>
-                  </View>
-                ) : (
-                  <>
-                    <Text style={{ color: C.textSecondary, fontSize: 13, marginBottom: 14, lineHeight: 18 }}>
-                      You have {recurringCharges.knownSubscriptions.length} active digital subscriptions.
-                    </Text>
-                    {recurringCharges.knownSubscriptions.map((l, i) => (
-                      <View key={i} style={styles.leakRow}>
-                        <View>
-                          <Text style={styles.leakMerchant}>{l.merchant}</Text>
-                          <Text style={styles.leakCount}>Charged {l.count} times</Text>
-                        </View>
-                        <Text style={styles.leakAmount}>₹{l.amount.toLocaleString('en-IN')}</Text>
-                      </View>
-                    ))}
-                  </>
-                )}
-              </View>
+              )}
 
               {/* Repetitive Payments Card */}
-              {recurringCharges.repetitivePayments.length > 0 && (
+              {pinnedFeatures.includes('repetitive') && recurringCharges.repetitivePayments.length > 0 && (
                 <View style={[styles.glassCard, { padding: 20, marginBottom: 14, borderColor: 'rgba(245,158,11,0.22)' }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('repetitive')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
                   <View style={styles.cardTopRow}>
                     <View style={styles.cardTitleWithIcon}>
                       <View style={[styles.iconBadge, { backgroundColor: 'rgba(245,158,11,0.14)' }]}>
@@ -1348,9 +1543,14 @@ return (
               )}
 
               {/* AI Behavior Feed */}
-              {behaviorFeed.length > 0 && (
+              {pinnedFeatures.includes('feed') && behaviorFeed.length > 0 && (
                 <View style={{ marginBottom: 14 }}>
-                  <Text style={styles.cardHeaderTitle}>AI BEHAVIOR FEED</Text>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <Text style={styles.cardHeaderTitle}>AI BEHAVIOR FEED</Text>
+                    <TouchableOpacity onPress={() => togglePin('feed')} style={{ opacity: 0.5, marginRight: 10 }}>
+                        <Icon name="close-circle-outline" size={16} color={C.textSecondary} />
+                    </TouchableOpacity>
+                  </View>
                   <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
@@ -1370,124 +1570,148 @@ return (
               )}
 
               {/* AI Monthly Forecast Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
-                  <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)', marginRight: 12 }]}>
-                    <Icon name="chart-line" size={16} color={C.accent} />
+              {pinnedFeatures.includes('forecast') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('forecast')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+                    <View style={[styles.iconBadge, { backgroundColor: 'rgba(56,189,248,0.14)', marginRight: 12 }]}>
+                      <Icon name="chart-line" size={16} color={C.accent} />
+                    </View>
+                    <View>
+                      <Text style={styles.cardHeaderTitle}>NEXT MONTH FORECAST</Text>
+                      <Text style={styles.subtleText}>Based on your current spending velocity</Text>
+                    </View>
                   </View>
-                  <View>
-                    <Text style={styles.cardHeaderTitle}>NEXT MONTH FORECAST</Text>
-                    <Text style={styles.subtleText}>Based on your current spending velocity</Text>
+
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <View>
+                      <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Projected Spend</Text>
+                      <Text style={{ color: C.textPrimary, fontSize: 22, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>
+                        ₹{(monthlyForecast?.projectedSpend || 0).toLocaleString('en-IN')}
+                      </Text>
+                    </View>
+
+                    <View style={{ alignItems: 'flex-end' }}>
+                      <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Overspend Risk</Text>
+                      <Text style={{ color: monthlyForecast?.riskColor || C.accent, fontSize: 22, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>
+                        {monthlyForecast?.overspendRisk || 0}%
+                      </Text>
+                    </View>
                   </View>
+
+                  <View style={styles.riskBarBackground}>
+                    <View style={[
+                      styles.riskBarFill,
+                      {
+                        width: `${monthlyForecast?.overspendRisk || 0}%`,
+                        backgroundColor: monthlyForecast?.riskColor || C.accent
+                      }
+                    ]} />
+                  </View>
+
+                  <Text style={{ color: monthlyForecast?.riskColor || C.accent, fontSize: 11, fontWeight: '700', marginTop: 8, textAlign: 'right', fontFamily: Typography.fontFamilyBold }}>
+                    {(monthlyForecast?.riskLevel || 'LOW').toUpperCase()} RISK
+                  </Text>
                 </View>
-
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View>
-                    <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Projected Spend</Text>
-                    <Text style={{ color: C.textPrimary, fontSize: 22, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>
-                      ₹{(monthlyForecast?.projectedSpend || 0).toLocaleString('en-IN')}
-                    </Text>
-                  </View>
-
-                  <View style={{ alignItems: 'flex-end' }}>
-                    <Text style={{ color: C.textSecondary, fontSize: 12, marginBottom: 4 }}>Overspend Risk</Text>
-                    <Text style={{ color: monthlyForecast?.riskColor || C.accent, fontSize: 22, fontWeight: '800', fontFamily: Typography.fontFamilyBold }}>
-                      {monthlyForecast?.overspendRisk || 0}%
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.riskBarBackground}>
-                  <View style={[
-                    styles.riskBarFill,
-                    {
-                      width: `${monthlyForecast?.overspendRisk || 0}%`,
-                      backgroundColor: monthlyForecast?.riskColor || C.accent
-                    }
-                  ]} />
-                </View>
-
-                <Text style={{ color: monthlyForecast?.riskColor || C.accent, fontSize: 11, fontWeight: '700', marginTop: 8, textAlign: 'right', fontFamily: Typography.fontFamilyBold }}>
-                  {(monthlyForecast?.riskLevel || 'LOW').toUpperCase()} RISK
-                </Text>
-              </View>
+              )}
 
               {/* Savings Goals Card */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={styles.cardHeaderTitle}>SAVINGS VAULT</Text>
-                  <TouchableOpacity onPress={() => setShowAddGoalModal(true)}>
-                    <Text style={{ color: C.accent, fontSize: 12, fontWeight: 'bold' }}>+ New Goal</Text>
+              {pinnedFeatures.includes('goals') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('goals')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
                   </TouchableOpacity>
-                </View>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Text style={styles.cardHeaderTitle}>SAVINGS VAULT</Text>
+                    <TouchableOpacity onPress={() => setShowAddGoalModal(true)}>
+                      <Text style={{ color: C.accent, fontSize: 12, fontWeight: 'bold' }}>+ New Goal</Text>
+                    </TouchableOpacity>
+                  </View>
 
-                {goals.length === 0 ? (
-                  <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10 }}>
-                    No goals yet. Tap "+ New Goal" to start your vault!
-                  </Text>
-                ) : (
-                  goals.map((goal) => {
-                    const pct = Math.min((goal.current / goal.target) * 100, 100);
-                    return (
-                      <View key={goal.id} style={styles.goalRow}>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
-                          <Text style={styles.goalName}>{goal.name}</Text>
-                          <Text style={styles.goalMeta}>₹{goal.current.toLocaleString('en-IN')} / ₹{goal.target.toLocaleString('en-IN')}</Text>
+                  {goals.length === 0 ? (
+                    <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10 }}>
+                      No goals yet. Tap "+ New Goal" to start your vault!
+                    </Text>
+                  ) : (
+                    goals.map((goal) => {
+                      const pct = Math.min((goal.current / goal.target) * 100, 100);
+                      return (
+                        <View key={goal.id} style={styles.goalRow}>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                            <Text style={styles.goalName}>{goal.name}</Text>
+                            <Text style={styles.goalMeta}>₹{goal.current.toLocaleString('en-IN')} / ₹{goal.target.toLocaleString('en-IN')}</Text>
+                          </View>
+                          <View style={styles.goalProgressBg}>
+                            <View style={[styles.goalProgressFill, { width: `${pct}%`, backgroundColor: goal.color }]} />
+                          </View>
+                          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
+                            <Text style={styles.goalDeadline}>{Math.round(pct)}% complete</Text>
+                            <TouchableOpacity
+                              style={[styles.depositButton, { borderColor: `${goal.color}50` }]}
+                              onPress={() => setDepositGoalId(goal.id)}
+                            >
+                              <Text style={[styles.depositButtonText, { color: goal.color }]}>+ Deposit</Text>
+                            </TouchableOpacity>
+                          </View>
                         </View>
-                        <View style={styles.goalProgressBg}>
-                          <View style={[styles.goalProgressFill, { width: `${pct}%`, backgroundColor: goal.color }]} />
-                        </View>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 6 }}>
-                          <Text style={styles.goalDeadline}>{Math.round(pct)}% complete</Text>
-                          <TouchableOpacity
-                            style={[styles.depositButton, { borderColor: `${goal.color}50` }]}
-                            onPress={() => setDepositGoalId(goal.id)}
-                          >
-                            <Text style={[styles.depositButtonText, { color: goal.color }]}>+ Deposit</Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    );
-                  })
-                )}
-              </View>
+                      );
+                    })
+                  )}
+                </View>
+              )}
 
               {/* Premium Weekly Spending Chart */}
-              <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                  <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING</Text>
-                  <Text style={styles.subtleText}>
-                    Total: ₹{Math.round(monthlyWeeklyData[activeWeekIndex]?.data.reduce((a, b) => a + b.amount, 0) || 0).toLocaleString('en-IN')}
-                  </Text>
+              {pinnedFeatures.includes('chart') && (
+                <View style={[styles.glassCard, { padding: 20, marginBottom: 14 }]}>
+                  <TouchableOpacity
+                    onPress={() => togglePin('chart')}
+                    style={{ position: 'absolute', right: 10, top: 10, zIndex: 10, opacity: 0.5 }}
+                  >
+                    <Icon name="close-circle-outline" size={18} color={C.textSecondary} />
+                  </TouchableOpacity>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                    <Text style={styles.cardHeaderTitle}>WEEKLY SPENDING</Text>
+                    <Text style={styles.subtleText}>
+                      Total: ₹{Math.round(monthlyWeeklyData[activeWeekIndex]?.data.reduce((a, b) => a + b.amount, 0) || 0).toLocaleString('en-IN')}
+                    </Text>
+                  </View>
+
+                  <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    style={{ flexDirection: 'row', marginBottom: 16, maxHeight: 36 }}
+                    contentContainerStyle={{ alignItems: 'center' }}
+                  >
+                    {monthlyWeeklyData.map((week, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        activeOpacity={0.8}
+                        style={[styles.weekChip, activeWeekIndex === i && styles.weekChipActive, { marginRight: 8 }]}
+                        onPress={() => { setActiveWeekIndex(i); setActiveDay(null); }}
+                      >
+                        <Text style={[styles.weekChipText, activeWeekIndex === i && styles.weekChipTextActive]}>Week {week.weekNum}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+
+                  {monthlyWeeklyData[activeWeekIndex] && (
+                    <PremiumChart
+                      data={monthlyWeeklyData[activeWeekIndex].data}
+                      activeDay={activeDay}
+                      setActiveDay={setActiveDay}
+                      maxValue={globalMaxSpend}
+                    />
+                  )}
                 </View>
-
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  style={{ flexDirection: 'row', marginBottom: 16, maxHeight: 36 }}
-                  contentContainerStyle={{ alignItems: 'center' }}
-                >
-                  {monthlyWeeklyData.map((week, i) => (
-                    <TouchableOpacity
-                      key={i}
-                      activeOpacity={0.8}
-                      style={[styles.weekChip, activeWeekIndex === i && styles.weekChipActive, { marginRight: 8 }]}
-                      onPress={() => { setActiveWeekIndex(i); setActiveDay(null); }}
-                    >
-                      <Text style={[styles.weekChipText, activeWeekIndex === i && styles.weekChipTextActive]}>Week {week.weekNum}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-
-                {monthlyWeeklyData[activeWeekIndex] && (
-                  <PremiumChart
-                    data={monthlyWeeklyData[activeWeekIndex].data}
-                    activeDay={activeDay}
-                    setActiveDay={setActiveDay}
-                    maxValue={globalMaxSpend}
-                  />
-                )}
-              </View>
+              )}
             </Animated.View>
           )}
         />
@@ -1513,6 +1737,8 @@ return (
           setMode={(m) => { setMode(m); saveState({ mode: m }); }}
           resetAppData={resetAppData}
           userLabels={userLabels}
+          pinnedFeatures={pinnedFeatures}
+          togglePin={togglePin}
         />
       )}
 

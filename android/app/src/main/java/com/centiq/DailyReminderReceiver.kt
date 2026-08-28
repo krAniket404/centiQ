@@ -28,18 +28,22 @@ class DailyReminderReceiver : BroadcastReceiver() {
             notificationManager.createNotificationChannel(channel)
         }
 
+        // Intent to open the app (Fix #5)
+        val openAppIntent = context.packageManager.getLaunchIntentForPackage(context.packageName)
+        val openAppPendingIntent = android.app.PendingIntent.getActivity(
+            context, 2001, openAppIntent, android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+        )
+
         val builder = NotificationCompat.Builder(context, channelId)
-            // Uses a much nicer built-in bell/alarm icon instead of the ugly warning sign
             .setSmallIcon(android.R.drawable.ic_popup_reminder)
             .setContentTitle(title)
             .setContentText(message)
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            // Adds your Q blue accent color to the icon and app name
             .setColor(0xFF38BDF8.toInt())
             .setColorized(true)
-            // Makes it slide down from the top of the screen
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_REMINDER)
+            .setContentIntent(openAppPendingIntent)
             .setAutoCancel(true)
 
         try {

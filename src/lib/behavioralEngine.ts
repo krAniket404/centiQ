@@ -36,8 +36,8 @@ function getWeekOfYear(date: Date): number {
   return Math.ceil((days + start.getDay() + 1) / 7);
 }
 
-export function calculateDisciplineScore(transactions: ParsedTransaction[]): number {
-  const discretionary = transactions.filter(t => t.type === 'debit');
+export function calculateDisciplineScore(transactions: ParsedTransaction[], excludeIds: string[] = []): number {
+  const discretionary = transactions.filter(t => t.type === 'debit' && !excludeIds.includes(t.id!));
   if (discretionary.length === 0) return 100;
 
   const monthlySpend: { [key: string]: number } = {};
@@ -61,8 +61,8 @@ export function calculateDisciplineScore(transactions: ParsedTransaction[]): num
   return mapCVtoScore(blendedCV);
 }
 
-export function calculateImpulseIndex(transactions: ParsedTransaction[], monthlyIncome: number = 0): number {
-  const discretionary = transactions.filter(t => t.type === 'debit');
+export function calculateImpulseIndex(transactions: ParsedTransaction[], monthlyIncome: number = 0, excludeIds: string[] = []): number {
+  const discretionary = transactions.filter(t => t.type === 'debit' && !excludeIds.includes(t.id!));
   if (discretionary.length === 0) return 0;
 
   // 1. Late-Night Rule (40% weight)
@@ -95,8 +95,8 @@ export function calculateImpulseIndex(transactions: ParsedTransaction[], monthly
   return Math.round((lateNightRatio * 0.4 + sameDayClusterRatio * 0.3 + highValueRatio * 0.3) * 100);
 }
 
-export function calculateVolatilityScore(transactions: ParsedTransaction[]): number {
-  const discretionary = transactions.filter(t => t.type === 'debit');
+export function calculateVolatilityScore(transactions: ParsedTransaction[], excludeIds: string[] = []): number {
+  const discretionary = transactions.filter(t => t.type === 'debit' && !excludeIds.includes(t.id!));
   if (discretionary.length === 0) return 100;
 
   const weeklySpend: { [key: string]: number } = {};
