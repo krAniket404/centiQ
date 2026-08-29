@@ -2,18 +2,44 @@ import React, { useMemo } from 'react';
 import { View, Text, TouchableOpacity, Modal, StyleSheet } from 'react-native';
 import { ParsedTransaction } from '../lib/smsParser';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
-
-const C = {
-  bg: "#060608", glass: "#111111", glassHighlight: "rgba(255,255,255,0.2)", border: "rgba(255,255,255,0.12)",
-  textPrimary: "#FFFFFF", textSecondary: "#A0A0B0", accent: "#38BDF8",
-  success: "#10B981", warning: "#F59E0B", danger: "#EF4444", purple: "#8B5CF6"
-};
+import { Theme, THEMES } from '../theme/themes';
 
 const Typography = {
   fontFamilyRegular: 'lato_regular',
   fontFamilyMedium: 'lato_regular',
   fontFamilyBold: 'lato_bold',
 };
+
+function createStyles(C: Theme) {
+  return StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  card: {
+    backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderTopColor: C.glassHighlight,
+    borderRadius: 32, alignItems: 'center',
+    shadowColor: "#000", shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.4, shadowRadius: 32, elevation: 12
+  },
+  headerBadge: {
+    width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(56,189,248,0.1)',
+    borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', justifyContent: 'center', alignItems: 'center'
+  },
+  title: { color: C.textPrimary, fontWeight: '800', letterSpacing: -0.3, fontFamily: Typography.fontFamilyBold, textAlign: 'center' },
+  subtitle: { color: C.textSecondary, fontSize: 13, marginBottom: 24, textAlign: 'center', fontFamily: Typography.fontFamilyRegular },
+  insightRow: {
+    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 14, marginBottom: 12, width: '100%'
+  },
+  insightIconBadge: {
+    width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)',
+    justifyContent: 'center', alignItems: 'center', marginRight: 12
+  },
+  text: { flex: 1, color: C.textPrimary, fontSize: 14, lineHeight: 20, fontFamily: Typography.fontFamilyMedium },
+  button: {
+    backgroundColor: C.accent, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 16, width: '100%', alignItems: 'center',
+    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8
+  },
+  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold }
+});
+}
 
 interface Props {
   visible: boolean;
@@ -22,9 +48,12 @@ interface Props {
   scores: { discipline: number; impulse: number; volatility: number; wellness: number; savingsRate: number };
   recurringCharges: { knownSubscriptions: any[] };
   monthlyForecast: { projectedSpend: number } | undefined;
+  theme: Theme;
 }
 
-export default function WowModal({ visible, onClose, transactions, scores, recurringCharges, monthlyForecast }: Props) {
+export default function WowModal({ visible, onClose, transactions, scores, recurringCharges, monthlyForecast, theme }: Props) {
+  const C = theme || THEMES.azure;
+  const styles = useMemo(() => createStyles(C), [C]);
   const wowInsights = useMemo(() => {
     if (!Array.isArray(transactions) || transactions.length === 0) return [];
     const debitTxns = transactions.filter(t => t.type === 'debit');
@@ -106,7 +135,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     }
 
     return insights.sort((a, b) => b.score - a.score).slice(0, 3);
-  }, [transactions, recurringCharges, scores, monthlyForecast]);
+  }, [transactions, recurringCharges, scores, monthlyForecast, C]);
 
   return (
     <Modal
@@ -116,7 +145,7 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
       onRequestClose={onClose}
     >
       <View style={[styles.overlay, { backgroundColor: 'rgba(0,0,0,0.95)' }]}>
-        <View style={[styles.card, { padding: 28, width: '100%' }]}>
+        <View style={styles.card}>
 
           <View style={styles.headerBadge}>
             <Icon name="brain" size={36} color={C.accent} />
@@ -145,32 +174,3 @@ export default function WowModal({ visible, onClose, transactions, scores, recur
     </Modal>
   );
 }
-
-const styles = StyleSheet.create({
-  overlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
-  card: {
-    backgroundColor: C.glass, borderWidth: 1, borderColor: C.border, borderTopColor: C.glassHighlight,
-    borderRadius: 32, alignItems: 'center',
-    shadowColor: "#000", shadowOffset: { width: 0, height: 16 }, shadowOpacity: 0.4, shadowRadius: 32, elevation: 12
-  },
-  headerBadge: {
-    width: 70, height: 70, borderRadius: 35, backgroundColor: 'rgba(56,189,248,0.1)',
-    borderWidth: 1, borderColor: 'rgba(56,189,248,0.3)', justifyContent: 'center', alignItems: 'center'
-  },
-  title: { color: C.textPrimary, fontWeight: '800', letterSpacing: -0.3, fontFamily: Typography.fontFamilyBold, textAlign: 'center' },
-  subtitle: { color: C.textSecondary, fontSize: 13, marginBottom: 24, textAlign: 'center', fontFamily: Typography.fontFamilyRegular },
-  insightRow: {
-    flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.03)',
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)', borderRadius: 16, padding: 14, marginBottom: 12, width: '100%'
-  },
-  insightIconBadge: {
-    width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)',
-    justifyContent: 'center', alignItems: 'center', marginRight: 12
-  },
-  text: { flex: 1, color: C.textPrimary, fontSize: 14, lineHeight: 20, fontFamily: Typography.fontFamilyMedium },
-  button: {
-    backgroundColor: C.accent, paddingVertical: 14, paddingHorizontal: 32, borderRadius: 16, width: '100%', alignItems: 'center',
-    shadowColor: C.accent, shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.5, shadowRadius: 12, elevation: 8
-  },
-  buttonText: { color: '#001018', fontSize: 16, fontWeight: '800', fontFamily: Typography.fontFamilyBold }
-});

@@ -126,7 +126,9 @@ export interface RecurringCharge {
   merchant: string;
   amount: number;
   count: number;
-  transactions: ParsedTransaction[]; // Added to hold the actual dates
+  transactions: ParsedTransaction[];
+  hasPriceIncrease?: boolean;
+  isGhost?: boolean;
 }
 
 export interface SubscriptionResult {
@@ -134,10 +136,9 @@ export interface SubscriptionResult {
   repetitivePayments: RecurringCharge[];
 }
 
-export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): SubscriptionResult {
+export function detectSubscriptionLeaks(transactions: ParsedTransaction[], worthItTxnIds: string[] = []): SubscriptionResult {
   const recurringMap: { [key: string]: ParsedTransaction[] } = {};
 
-  // Group transactions by Merchant Name ONLY (ignoring amount)
   transactions.filter(t => t.type === 'debit').forEach(t => {
     const key = t.merchant || 'Unknown Merchant';
     if (!recurringMap[key]) recurringMap[key] = [];
@@ -145,24 +146,32 @@ export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): Subs
   });
 
   const knownSubs: RecurringCharge[] = [];
-  const repetitivePays: RepetitiveCharge[] = [];
+  const repetitivePays: RecurringCharge[] = [];
+  const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
 
-  // Split them based on the known list
   Object.values(recurringMap).forEach(group => {
-    if (group.length >= 3) { // 3 or more transactions = recurring
-      // Calculate total amount spent across all transactions
-      const totalAmount = group.reduce((sum, t) => sum + t.amount, 0);
+    if (group.length >= 2) {
+      const sorted = [...group].sort((a, b) => b.date.getTime() - a.date.getTime());
+      const latestAmt = sorted[0].amount;
+      const previousAmt = sorted[1]?.amount || latestAmt;
+      const hasPriceIncrease = latestAmt > previousAmt * 1.05; // 5% buffer
 
-      const charge = {
+      // Ghost detection: check if any transaction in last 60 days was marked "Worth It"
+      const recentTxns = group.filter(t => t.date.getTime() > sixtyDaysAgo);
+      const isGhost = recentTxns.length > 0 && !recentTxns.some(t => worthItTxnIds.includes(t.id!));
+
+      const charge: RecurringCharge = {
         merchant: group[0].merchant,
-        amount: totalAmount, // Now shows total spent
+        amount: latestAmt, // Show latest individual charge amount
         count: group.length,
-        transactions: group
+        transactions: group,
+        hasPriceIncrease,
+        isGhost
       };
 
       if (isKnownSubscription(charge.merchant)) {
         knownSubs.push(charge);
-      } else {
+      } else if (group.length >= 3) {
         repetitivePays.push(charge);
       }
     }
@@ -173,4 +182,30 @@ export function detectSubscriptionLeaks(transactions: ParsedTransaction[]): Subs
 
 export function calculateWellnessScore(discipline: number, impulse: number, volatility: number): number {
   return Math.round((discipline * (1/3)) + ((100 - impulse) * (1/3)) + ((100 - volatility) * (1/3)));
+}
+
+// --- PREDICTIVE INTELLIGENCE ---
+
+export function predictBreachDate(category: string, spent: number, budget: number, transactions: ParsedTransaction[]): string | null {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+    const today = now.getDate();
+
+    if (spent <= 0 || budget <= 0 || today < 3) return null; // Need some data
+
+    // Calculate daily average for this category
+    const dailyAvg = spent / today;
+
+    if (spent >= budget) return "BREACHED";
+
+    const remainingBudget = budget - spent;
+    const daysUntilBreach = remainingBudget / dailyAvg;
+    const breachDay = Math.floor(today + daysUntilBreach);
+
+    if (breachDay > daysInMonth) return null; // Won't breach this month
+
+    const breachDate = new Date(currentYear, currentMonth, breachDay);
+    return breachDate.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }

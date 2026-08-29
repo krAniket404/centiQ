@@ -1,0 +1,2 @@
+- [x] Remove extra horizontal padding from `BudgetsScreen.tsx`
+- [x] Remove extra horizontal padding from `SettingsScreen.tsx`

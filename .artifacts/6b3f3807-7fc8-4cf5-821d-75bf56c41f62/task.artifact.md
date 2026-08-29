@@ -1,19 +1,15 @@
-# CentiQ Dashboard & Persistence Tasks
+# Intelligence & Multi-Account Update Tasks
 
-- [x] **Android Native Layer**
-    - [x] Update `SmsReceiver.kt` to ensure notifications open the app.
-    - [x] Update `QNotificationListener.kt` to ensure notifications open the app.
-    - [x] Add `scheduleRepeatingNotification` and `cancelNotification` to `SmsModule.kt`.
-- [x] **Shared Logic Layer (TypeScript)**
-    - [x] Fix `streakData` counting logic (start from today, better date matching).
-    - [x] Implement `monthlySpendTotal` calculation.
-    - [x] Add `pinnedFeatures` state management (load/save).
-- [x] **App UI Layer**
-    - [x] Add "Monthly Spend" display to Dashboard header.
-    - [x] Implement "Unpin" UI (close icon) on dashboard cards.
-    - [x] Implement "Edit Dashboard" UI in Settings.
-    - [x] Integrate 6-hour Vault reminders in `addPendingPurchase` and `resolvePurchase`.
-- [x] **Verification**
-    - [x] Verify streak counts correctly reset/increment.
-    - [x] Verify notifications open the app.
-    - [x] Verify vault reminders are scheduled (logs).
+- [x] **Multi-Account Support**
+    - [x] Add Amex parsing patterns to `smsParser.ts`.
+    - [x] Refine HDFC/ICICI patterns for better merchant name extraction.
+- [x] **Predictive AI**
+    - [x] Implement velocity calculation in `behavioralEngine.ts`.
+    - [x] Add "Predicted Breach" UI to `BudgetsScreen.tsx`.
+- [x] **Vault Automation**
+    - [x] Implement "Surplus Detection" in `App.tsx`.
+    - [x] Add "Sweep" suggestion logic to AI Coach.
+- [x] **UI Refinement**
+    - [x] Fix text contrast (remove black-on-black) in `App.tsx`.
+    - [x] Fix text contrast in `TransactionsScreen.tsx`.
+    - [x] Fix text contrast in `MonthlyWrapModal.tsx`.

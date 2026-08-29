@@ -90,6 +90,13 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
       if (vpaMatch) merchant = vpaMatch[1].trim().toUpperCase();
   }
 
+  // AMEX Special Handling
+  if (upperBody.includes('AMEX') || upperBody.includes('AMERICAN EXPRESS')) {
+      const amexMerchantMatch = cleanBody.match(/AT\s+([A-Za-z0-9\s&'-]+?)(?=\sON\s|\sAT\s|\sUSING\s|\sWITH\s|\.|$)/i);
+      if (amexMerchantMatch) merchant = amexMerchantMatch[1].trim().toUpperCase();
+      bank = 'AMEX';
+  }
+
   if (merchant.length < 3) merchant = 'Unknown';
 
   // 6. Identify Bank
@@ -98,6 +105,7 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   else if (upperBody.includes('ICICI')) bank = 'ICICI';
   else if (upperBody.includes('AXIS')) bank = 'AXIS';
   else if (upperBody.includes('KOTAK')) bank = 'KOTAK';
+  else if (upperBody.includes('AMEX') || upperBody.includes('AMERICAN EXPRESS')) bank = 'AMEX';
   else if (upperBody.includes('INDIAN BANK')) bank = 'Indian Bank';
   else if (upperBody.includes('CANARA')) bank = 'Canara Bank';
   else if (upperBody.includes('PNB') || upperBody.includes('PUNJAB NATIONAL')) bank = 'PNB';

@@ -1,4 +1,6 @@
 // src/theme/scoreColor.ts
+import { Theme } from './themes';
+
 export const C = {
   success: '#10B981',
   warning: '#F59E0B',
@@ -6,9 +8,10 @@ export const C = {
   accent: '#38BDF8',
 };
 
-export function getScoreColor(score: number, direction: 'higher_is_better' | 'lower_is_better'): string {
+export function getScoreColor(score: number, direction: 'higher_is_better' | 'lower_is_better', theme?: Theme): string {
   const effective = direction === 'higher_is_better' ? score : 100 - score;
-  if (effective >= 70) return C.success;
-  if (effective >= 40) return C.warning;
-  return C.danger;
+  const colors = theme || C;
+  if (effective >= 70) return colors.success;
+  if (effective >= 40) return colors.warning;
+  return colors.danger;
 }
