@@ -132,11 +132,23 @@ export default function App() {
       const success = await SmsModule.authenticateUser();
       if (success) {
         setIsLocked(false);
-      } else {
-        // Fallback for user cancellation or other non-fatal errors
       }
-    } catch (e) {
-      // If error is related to cancel, we just stay locked and show a button
+    } catch (e: any) {
+      console.log("Biometric Auth Error:", e);
+      const errorMsg = e.message || e.toString();
+
+      if (errorMsg.includes("not enrolled") || errorMsg.includes("no biometric")) {
+        Alert.alert(
+          "Security Required",
+          "Please set up a Fingerprint, FaceID, or PIN on your device settings first to use this feature.",
+          [{ text: "OK", onPress: () => {
+            setIsLocked(false);
+            setIsBiometricEnabled(false);
+            saveState({ isBiometricEnabled: false });
+          }}]
+        );
+      }
+      // If user cancelled, we just stay on the lock screen with the "Unlock Now" button
     }
   };
 
@@ -1137,15 +1149,27 @@ export default function App() {
       {isLocked && (
         <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg, zIndex: 10000, justifyContent: 'center', alignItems: 'center', padding: 40 }]}>
             <View style={{ width: 100, height: 100, borderRadius: 50, backgroundColor: `${theme.accent}15`, justifyContent: 'center', alignItems: 'center', marginBottom: 30 }}>
-                <Icon name="lock-outline" size={48} color={theme.accent} />
+                <Icon name="fingerprint" size={48} color={theme.accent} />
             </View>
             <Text style={{ color: theme.textPrimary, fontSize: 24, fontWeight: '800', marginBottom: 12, textAlign: 'center' }}>CentiQ is Locked</Text>
-            <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 40, lineHeight: 20 }}>Please authenticate to access your financial behavioral profile.</Text>
+            <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginBottom: 40, lineHeight: 20 }}>Please authenticate using your device biometric or PIN to access your profile.</Text>
+
             <TouchableOpacity
-                style={{ backgroundColor: theme.accent, paddingVertical: 16, paddingHorizontal: 40, borderRadius: 16 }}
+                style={{ backgroundColor: theme.accent, paddingVertical: 16, paddingHorizontal: 40, borderRadius: 16, width: '100%', alignItems: 'center' }}
                 onPress={handleBiometricUnlock}
             >
-                <Text style={{ color: '#FFF', fontSize: 16, fontWeight: '800' }}>Unlock Now</Text>
+                <Text style={{ color: theme.bg, fontSize: 16, fontWeight: '800' }}>Unlock Now</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+                style={{ marginTop: 20, padding: 10 }}
+                onPress={() => {
+                  setIsLocked(false);
+                  setIsBiometricEnabled(false);
+                  saveState({ isBiometricEnabled: false });
+                }}
+            >
+                <Text style={{ color: theme.textSecondary, fontSize: 13 }}>Turn off lock (debug only)</Text>
             </TouchableOpacity>
         </View>
       )}

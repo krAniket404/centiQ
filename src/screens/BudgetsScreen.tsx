@@ -193,7 +193,10 @@ export default function BudgetsScreen({ transactions, theme }: Props) {
 
   useEffect(() => {
     if (!loaded) return;
-    SmsModule.saveData(STORAGE_KEY, JSON.stringify(budgets)).catch(() => {});
+    const timeout = setTimeout(() => {
+      SmsModule.saveData(STORAGE_KEY, JSON.stringify(budgets)).catch(() => {});
+    }, 1000);
+    return () => clearTimeout(timeout);
   }, [budgets, loaded]);
 
   useEffect(() => {
@@ -335,19 +338,19 @@ export default function BudgetsScreen({ transactions, theme }: Props) {
           else if (percent >= 70) progressColor = C.warning;
 
           return (
-            <TouchableOpacity key={category} activeOpacity={0.8} onPress={() => setViewingCategory(category)}>
-              <BudgetCard
-                category={category}
-                spentAmount={spentAmount}
-                budgetAmount={budgetAmount}
-                percent={percent}
-                isOver={isOver}
-                progressColor={progressColor}
-                breachDate={breachDate}
-                onChangeBudget={(val) => updateBudget(category, val)}
-                theme={theme}
-              />
-            </TouchableOpacity>
+            <BudgetCard
+              key={category}
+              category={category}
+              spentAmount={spentAmount}
+              budgetAmount={budgetAmount}
+              percent={percent}
+              isOver={isOver}
+              progressColor={progressColor}
+              breachDate={breachDate}
+              onChangeBudget={(val) => updateBudget(category, val)}
+              onViewTransactions={() => setViewingCategory(category)}
+              theme={theme}
+            />
           );
         })}
       </ScrollView>
@@ -398,7 +401,7 @@ export default function BudgetsScreen({ transactions, theme }: Props) {
 }
 
 function BudgetCard({
-  category, spentAmount, budgetAmount, percent, isOver, progressColor, breachDate, onChangeBudget, theme
+  category, spentAmount, budgetAmount, percent, isOver, progressColor, breachDate, onChangeBudget, onViewTransactions, theme
 }: {
   category: string;
   spentAmount: number;
@@ -408,11 +411,13 @@ function BudgetCard({
   progressColor: string;
   breachDate: string | null;
   onChangeBudget: (val: string) => void;
+  onViewTransactions: () => void;
   theme: Theme;
 }) {
   const C = theme || THEMES.azure;
   const styles = useMemo(() => createStyles(C), [C]);
   const widthAnim = useRef(new Animated.Value(0)).current;
+  const [isFocused, setIsFocused] = useState(false);
 
   useEffect(() => {
     Animated.timing(widthAnim, {
@@ -425,7 +430,11 @@ function BudgetCard({
   return (
     <View style={styles.budgetCard}>
       <View style={styles.budgetHeaderRow}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+        <TouchableOpacity
+          style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}
+          onPress={onViewTransactions}
+          activeOpacity={0.7}
+        >
           <View style={[styles.categoryIconBadge, { backgroundColor: `${CAT_COLORS[category] || C.textSecondary}1F` }]}>
             <Icon name={CAT_ICONS[category] || 'package-variant-closed'} size={16} color={CAT_COLORS[category] || C.textSecondary} />
           </View>
@@ -435,15 +444,17 @@ function BudgetCard({
               <Text style={styles.overBadgeText}>OVER</Text>
             </View>
           )}
-        </View>
-        <View style={styles.budgetInputWrapper}>
+        </TouchableOpacity>
+        <View style={[styles.budgetInputWrapper, isFocused && { borderColor: C.accent, backgroundColor: 'rgba(255,255,255,0.08)' }]}>
           <Text style={styles.currencySymbol}>₹</Text>
           <TextInput
             style={styles.budgetInput}
             value={budgetAmount.toString()}
             onChangeText={onChangeBudget}
-            keyboardType="numeric"
+            keyboardType="number-pad"
             selectTextOnFocus
+            onFocus={() => setIsFocused(true)}
+            onBlur={() => setIsFocused(false)}
           />
         </View>
       </View>

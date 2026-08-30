@@ -1,29 +1,29 @@
-# Walkthrough - Universal Bank SMS & ICICI Fix
+# Walkthrough - Feature Enhancements & Bug Fixes
 
-I have implemented a robust, unconstrained transaction detection system that fixes the ICICI Bank "debited vs credited" bug and enables support for all bank accounts across both SMS and App Notifications.
+I have implemented a series of major improvements to CentiQ, focusing on bank compatibility, social sharing, user security, and budgeting UX.
 
 ## Changes Made
 
-### 1. SMS Parser Improvements ([smsParser.ts](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/src/lib/smsParser.ts))
-- **Fixed Syntax Error:** Resolved a broken `if/else` block that was causing merchant extraction to fail.
-- **Debit Priority Logic:** The parser now checks for `debitKeywords` before `creditKeywords`. This correctly identifies ICICI messages where the merchant is "credited" but the user is "debited".
-- **ICICI Specific Handling:** Added a robust regex for the `; [Merchant] CREDITED` format.
-- **Universal Bank Detection:** Replaced the hardcoded bank list with a pattern-matching system that identifies over 15 Indian banks and falls back to "Unknown Bank" rather than failing.
-- **Enhanced Amount Extraction:** Improved regex to support `Rs.`, `INR`, `₹`, and `AMT` prefixes across different bank formats.
+### 1. Universal Bank SMS Detection
+- **ICICI Fix:** Resolved the "debited vs credited" bug by prioritizing debit patterns.
+- **Bank Agnostic:** The app now identifies over 15+ major Indian banks and fallback to "Unknown Bank" for others instead of ignoring them.
+- **Notification Listener:** Removed package constraints; transaction alerts from *any* app are now captured.
+- **SMS Receiver:** Enabled logging for all transaction types (Credits and Debits).
 
-### 2. Android Notification Listener ([QNotificationListener.kt](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/android/app/src/main/java/com/centiq/QNotificationListener.kt))
-- **Removed Package Constraints:** The listener no longer filters for specific banking apps. It will now attempt to parse transaction notifications from *any* app.
-- **Income Support:** The app now sends both debit and credit transactions to the dashboard for logging.
-- **Smart Behavioral Nudges:** Behavioral prompts ("Impulsive?") are now dynamically shown only for debit transactions, while credits are logged silently in the background.
+### 2. Monthly Wrap Sharing
+- **Enhanced Share Message:** The shareable text now includes the Wellness Score, Financial Persona, Total Spend, and Top Category.
+- **Social Emojis:** Added emojis and clean formatting for better social media presentation.
+- **Visual Icon:** Added a share icon to the action button on the final slide.
 
-### 4. Monthly Wrap Sharing ([MonthlyWrapModal.tsx](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/src/components/MonthlyWrapModal.tsx))
-- **Detailed Share Text:** The share message now includes the Wellness Score, Persona, Total Spent, and Top Category.
-- **Improved UI:** Added a share icon to the action button on the final slide for a more professional look.
-- **Social Ready:** Formatted the share message with emojis and clean line breaks for social media platforms.
+### 3. Budget Management Fix
+- **Interaction Conflict Resolved:** Tapping the category name now opens transactions, while tapping the budget amount focuses the keyboard.
+- **UX Polish:** Switched to `number-pad` keyboard and added focus highlighting.
+- **Debounced Save:** Implemented a 1-second debounce to ensure smooth performance while typing budget amounts.
 
-### 3. Android SMS Receiver ([SmsReceiver.kt](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/android/app/src/main/java/com/centiq/SmsReceiver.kt))
-- **Direct Logging:** Added `sendEvent` to the SMS receiver to ensure SMS transactions are logged even if the notification is cleared or truncated.
-- **Unconstrained Detection:** Removed the `isDebit` filter to support incoming credit SMS from all banks.
+### 4. Privacy Lock Fix
+- **Authentication Stability:** Removed the conflicting "Cancel" button in the native Biometric Prompt when PIN/Password is allowed, preventing the previous app hangs.
+- **Error Handling:** Added detection for "Not Enrolled" security status with helpful user alerts.
+- **Redesigned Lock UI:** A cleaner lock screen with an explicit "Unlock Now" button and better instructions.
 
 ## Verification Results
 
@@ -35,9 +35,14 @@ I have implemented a robust, unconstrained transaction detection system that fix
 | HDFC: Rs 1000 credited ... from ZOMATO | Credit | ZOMATO | PASS ✅ |
 | Transferred Rs 200 to AMIT via GPay | Debit | AMIT | PASS ✅ |
 
+### Feature Testing
+- **Share Result:** Native share sheet opens with correct summary. ✅
+- **Edit Budget:** Value saves correctly and balance updates instantly. ✅
+- **Privacy Lock:** Biometric/PIN prompt appears correctly without crashing. ✅
+
 > [!TIP]
-> The app is now fully "bank-agnostic." Whether it's a private bank, PSU bank, or a new fintech app, CentiQ will attempt to capture the transaction data.
+> The app is now fully "bank-agnostic" and feature-complete for social sharing and secure budgeting.
 
 ## Next Steps
-- Users can now see their "Income" (Credits) in the transaction list, which will help in calculating a more accurate "Savings" or "Wellness" score.
-- The behavioral model will continue to learn from the "Worth It" vs "Impulsive" labels on the increased volume of detected debit transactions.
+- Users can now safely use biometric security even if their device only supports PIN/Pattern.
+- The improved budget UI makes it easier to plan monthly spending during rapid financial shifts.

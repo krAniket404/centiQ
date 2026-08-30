@@ -1,34 +1,40 @@
-# Monthly Wrap Sharing Feature
+# Fix Budget Setting & Privacy Lock Features
 
-This plan outlines the enhancements to the "Monthly Wrap" feature to enable users to share their financial journey across social platforms or with friends.
+This plan addresses issues with budget management and the biometric privacy lock, ensuring a smoother user experience and reliable security.
 
 ## User Review Required
 
-> [!NOTE]
-> The sharing will currently be text-based using the native `Share` API. This is the most compatible way to share across apps without requiring extra image-processing libraries.
+> [!IMPORTANT]
+> **Privacy Lock Change:** I will fix the crash/failure in the Biometric Prompt by removing the conflicting "Cancel" button when system credentials (PIN/Pattern) are enabled. This will allow users to use their phone's existing password if biometrics aren't available.
+>
+> **Budget Interaction:** Tapping a category will now clearly distinguish between viewing transactions (tap name/icon) and editing the budget (tap the amount).
 
 ## Proposed Changes
 
 ### [UI Components]
 
-#### [MODIFY] [MonthlyWrapModal.tsx](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/src/components/MonthlyWrapModal.tsx)
-- **Enhanced Final Slide:** Redesign the last slide to include a "Shareable Card" look with a summary of stats.
-- **Improved Share Message:** Update the shared text to include:
-    - Wellness Score
-    - Financial Persona (Identity)
-    - Total Spent (formatted)
-    - Top Spending Category
-- **Visual Polish:** Add a "Share" icon (using MaterialCommunityIcons) to the action button for better visibility.
+#### [MODIFY] [BudgetsScreen.tsx](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/src/screens/BudgetsScreen.tsx)
+- **Resolve Interaction Conflict:** Move the "View Transactions" trigger away from the budget input field.
+- **Input Improvements:** Use `number-pad` for better numeric entry and add a focus state to the input wrapper.
+- **Persistence:** Ensure budgets are saved correctly to local storage with a debounce to prevent lag.
 
-### [Theme & Styling]
+### [Native Android]
 
-#### [MODIFY] [MonthlyWrapModal.tsx](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/src/components/MonthlyWrapModal.tsx)
-- Update styles for the share button and summary card for better contrast and aesthetics.
+#### [MODIFY] [SmsModule.kt](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/android/app/src/main/java/com/centiq/SmsModule.kt)
+- **Fix BiometricPrompt Crash:** Remove `setNegativeButtonText` when `DEVICE_CREDENTIAL` is included in allowed authenticators, as per Android API requirements.
+- **Improved Error Handling:** Pass specific error codes back to React Native to differentiate between "Cancelled", "Not Enrolled", and "Hardware Unavailable".
+
+### [Core Logic]
+
+#### [MODIFY] [App.tsx](file:///C:/Users/Sherly%20Sanjana.A/CentiQ/App.tsx)
+- **Robust Lock Handling:**
+    - Don't immediately lock the app if biometric setup fails during the initial toggle.
+    - Provide a "Retry" button on the lock screen.
+    - Handle the "Not Enrolled" case by alerting the user to set up a device lock first.
 
 ## Verification Plan
 
 ### Manual Verification
-1. Open the Monthly Wrap feature.
-2. Progress through all slides.
-3. On the final slide, verify the new summary details.
-4. Click the "Share" button and ensure the native share sheet opens with the correct, detailed text.
+1. **Budget Test:** Go to Budgets, tap the amount, change it, and verify it saves. Tap the category name and verify transactions show.
+2. **Security Test (Enrolled):** Enable Privacy Lock, minimize app, reopen, and verify the biometric prompt appears with a "Use PIN/Password" option.
+3. **Security Test (Not Enrolled):** Try to enable Privacy Lock on a device with no security and verify the app provides a helpful message instead of just locking.

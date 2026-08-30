@@ -228,12 +228,15 @@ class SmsModule(reactContext: ReactApplicationContext) : ReactContextBaseJavaMod
                 }
             })
 
-        val promptInfo = BiometricPrompt.PromptInfo.Builder()
+        val promptInfoBuilder = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Unlock CentiQ")
             .setSubtitle("Secure your financial data")
-            .setNegativeButtonText("Cancel")
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG or BiometricManager.Authenticators.DEVICE_CREDENTIAL)
-            .build()
+
+        // Android API requirement: setNegativeButtonText must NOT be called if DEVICE_CREDENTIAL is allowed.
+        // The system will provide its own "Use PIN/Password" or "Cancel" button.
+        
+        val promptInfo = promptInfoBuilder.build()
 
         activity.runOnUiThread {
             biometricPrompt.authenticate(promptInfo)
