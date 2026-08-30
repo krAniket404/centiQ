@@ -1,2 +1,4 @@
-- [x] Remove extra horizontal padding from `BudgetsScreen.tsx`
-- [x] Remove extra horizontal padding from `SettingsScreen.tsx`
+- [x] Update transaction type priority in `smsParser.ts`
+- [x] Update `fromRegex` to support numbers in sender names
+- [x] Add ICICI specific merchant extraction for mixed-keyword debits
+- [x] Verify parsing logic against provided examples

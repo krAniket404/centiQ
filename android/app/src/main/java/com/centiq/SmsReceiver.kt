@@ -8,6 +8,7 @@ import android.os.Build
 import android.provider.Telephony
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.facebook.react.modules.core.DeviceEventManagerModule
 
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -17,16 +18,32 @@ class SmsReceiver : BroadcastReceiver() {
             val lowerBody = messageBody.lowercase()
 
             // 1. MUST contain a transaction keyword
-            val txnKeywords = listOf("rs", "inr", "₹", "debited", "spent", "paid", "sent", "withdrawn")
+            val txnKeywords = listOf("rs", "inr", "₹", "debited", "spent", "paid", "sent", "withdrawn", "credited", "received", "transferred", "refunded")
             val hasTxnKeyword = txnKeywords.any { lowerBody.contains(it) }
 
-            // 2. ONLY notify for debit transactions (Fix #1)
-            val debitKeywords = listOf("debited", "spent", "paid", "sent", "withdrawn", "dr.")
-            val isDebit = debitKeywords.any { lowerBody.contains(it) }
+            if (hasTxnKeyword) {
+                // Send to JS for logging (All transactions)
+                sendEvent("transaction_notification", messageBody)
 
-            if (hasTxnKeyword && isDebit) {
-                showTransactionNotification(context)
+                // 2. ONLY notify/prompt for debit transactions (Behavioral nudge)
+                val debitKeywords = listOf("debited", "spent", "paid", "sent", "withdrawn", "dr.", "transferred")
+                val creditKeywords = listOf("credited", "received", "refunded")
+                
+                // Only show behavior prompt if it's likely a debit and NOT a credit
+                if (debitKeywords.any { lowerBody.contains(it) } && !creditKeywords.any { lowerBody.contains(it) }) {
+                    showTransactionNotification(context)
+                }
             }
+        }
+    }
+
+    private fun sendEvent(eventName: String, params: String) {
+        try {
+            val context = ReactContextSingleton.reactContext
+            context?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+                ?.emit(eventName, params)
+        } catch (e: Exception) {
+            android.util.Log.e("SmsReceiver", "RN Context not available yet", e)
         }
     }
 

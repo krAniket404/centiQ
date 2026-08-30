@@ -11,7 +11,7 @@ export interface ParsedTransaction {
 
 export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransaction | null {
   let amount = 0;
-  let bank = 'Bank Transfer';
+  let bank = 'Unknown Bank';
   let type: 'debit' | 'credit' | null = null;
   let merchant = '';
 
@@ -27,20 +27,24 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   ];
   if (spamKeywords.some(kw => upperBody.includes(kw))) return null;
 
-  // 2. Determine Transaction Type (Added Dr. and Cr. for PSU banks like Canara/SBI)
-  const creditKeywords = ['CREDITED', 'RECEIVED', 'REFUND', 'ADDED', 'DEPOSITED', 'REVERSAL', 'CR.', 'CR '];
+  // 2. Determine Transaction Type
+  // DEBIT PRIORITY: If a message contains both, it's usually a "debited for... merchant credited" format.
   const debitKeywords = ['DEBITED', 'SPENT', 'PAID', 'PURCHASE', 'WITHDRAWN', 'SENT', 'DEDUCTED', 'DR.', 'DR '];
+  const creditKeywords = ['CREDITED', 'RECEIVED', 'REFUND', 'ADDED', 'DEPOSITED', 'REVERSAL', 'CR.', 'CR '];
 
-  if (creditKeywords.some(kw => upperBody.includes(kw))) type = 'credit';
-  else if (debitKeywords.some(kw => upperBody.includes(kw))) type = 'debit';
-  else return null;
+  if (debitKeywords.some(kw => upperBody.includes(kw))) {
+    type = 'debit';
+  } else if (creditKeywords.some(kw => upperBody.includes(kw))) {
+    type = 'credit';
+  } else {
+    return null;
+  }
 
   // 3. PRE-CLEAN: Remove the "Balance" part of the SMS so we don't accidentally grab the balance amount!
-  // This splits the SMS at "Bal" or "Avl Bal" and only looks at the first half.
-  const cleanBody = smsBody.split(/Avl Bal|Bal INR|Avl bal|Balance INR|Bal Rs/i)[0];
+  const cleanBody = smsBody.split(/Avl Bal|Bal INR|Avl bal|Balance INR|Bal Rs|Account Balance/i)[0];
 
   // 4. Extract Amount
-  const amountRegex = /(?:Rs\.?|INR|₹)\s?([\d,]+\.?\d*)/i;
+  const amountRegex = /(?:Rs\.?|INR|₹|credited with Rs|DR\.?|CR\.?|AMT)\s?([\d,]+\.?\d*)/i;
   const match = cleanBody.match(amountRegex);
   if (match && match[1]) {
     amount = parseFloat(match[1].replace(/,/g, ''));
@@ -51,18 +55,10 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
 
   // 5. Extract Merchant / Person Name
   if (type === 'credit') {
-    const vpaRegex = /(?:from|by|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
-    const vpaMatch = cleanBody.match(vpaRegex);
-    if (vpaMatch && vpaMatch[1]) {
-      let vpaName = vpaMatch[1].trim().toUpperCase();
-      merchant = /^\d+$/.test(vpaName) ? 'VPA Transfer' : vpaName;
-    } else {
-      // Added ; and : to stop characters so it doesn't grab the UPI ID
-      const fromRegex = /(?:from|by|via)\s+([A-Za-z\s&'\.]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn)\b|[0-9]|\.\s*(?:RRN|Avl|Not)|;|:)/i;
-      const fromMatch = cleanBody.match(fromRegex);
-      if (fromMatch && fromMatch[1]) {
-        merchant = fromMatch[1].trim().toUpperCase();
-      }
+    const fromRegex = /(?:from|by|via|received from)\s+([A-Za-z0-9\s&'\.]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn)\b|[0-9]|\.\s*(?:RRN|Avl|Not)|;|:|$)/i;
+    const fromMatch = cleanBody.match(fromRegex);
+    if (fromMatch && fromMatch[1]) {
+      merchant = fromMatch[1].trim().toUpperCase();
     }
   } else {
     const vpaRegex = /(?:to|at|via)\s+([A-Za-z0-9\s&'-]+)@[a-z]+/i;
@@ -71,18 +67,23 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
       let vpaName = vpaMatch[1].trim().toUpperCase();
       merchant = /^\d+$/.test(vpaName) ? 'VPA Transfer' : vpaName;
     } else {
-      // Added ; and : to stop characters so it doesn't grab the UPI ID
-      const toRegex = /(?:to|at|via|towards)\s+([A-Za-z\s&'\.0-9]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn|pause)\b|[0-9]|\.\s*(?:RRN|Avl|Not)|;|:)/i;
+      const toRegex = /(?:to|at|via|towards)\s+([A-Za-z\s&'\.0-9]+?)(?=\s(?:on|ref|via|for|avbl|towards|upi|a\/c|account|using|from|by|balance|info|your|rrn|pause)\b|[0-9]|\.\s*(?:RRN|Avl|Not)|;|:|$)/i;
       const toMatch = cleanBody.match(toRegex);
       if (toMatch && toMatch[1]) {
         merchant = toMatch[1].trim().toUpperCase();
+      }
+
+      // ICICI Special: "...debited...; MERCHANT credited"
+      if (!merchant || merchant === 'Unknown' || merchant.length < 2) {
+        const iciciDebitMatch = cleanBody.match(/;\s+([A-Za-z\s&']+?)\s+CREDITED/i);
+        if (iciciDebitMatch) merchant = iciciDebitMatch[1].trim().toUpperCase();
       }
     }
   }
 
   // Clean up trailing periods, semicolons, and common garbage words
   merchant = merchant.replace(/\b(ON|REF|AVBL|VIA|UPI|YBL|OKAXIS|OKHDFCBANK|VPA|A\/C|ACCT|ACCOUNT|BAL|RRN|WWW|COM|NOT YOU|SMS BLOCK|INFO|YOUR|NOTIF|TXN|TRF|TRANSFER)\b/g, '').trim();
-  merchant = merchant.replace(/[;:\.]+$/, '').trim(); // Remove trailing semicolons, colons, periods
+  merchant = merchant.replace(/[;:\.]+$/, '').trim();
 
   // PSU Bank Special Handling (Canara, SBI, PNB often have specific strings)
   if (merchant.includes('VPA')) {
@@ -100,17 +101,30 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   if (merchant.length < 3) merchant = 'Unknown';
 
   // 6. Identify Bank
-  if (upperBody.includes('HDFC')) bank = 'HDFC';
-  else if (upperBody.includes('SBI')) bank = 'SBI';
-  else if (upperBody.includes('ICICI')) bank = 'ICICI';
-  else if (upperBody.includes('AXIS')) bank = 'AXIS';
-  else if (upperBody.includes('KOTAK')) bank = 'KOTAK';
-  else if (upperBody.includes('AMEX') || upperBody.includes('AMERICAN EXPRESS')) bank = 'AMEX';
-  else if (upperBody.includes('INDIAN BANK')) bank = 'Indian Bank';
-  else if (upperBody.includes('CANARA')) bank = 'Canara Bank';
-  else if (upperBody.includes('PNB') || upperBody.includes('PUNJAB NATIONAL')) bank = 'PNB';
-  else if (upperBody.includes('BOB') || upperBody.includes('BARODA')) bank = 'Bank of Baroda';
-  else if (upperBody.includes('UNION BANK')) bank = 'Union Bank';
+  const bankPatterns = [
+    { name: 'HDFC', pattern: /HDFC/i },
+    { name: 'SBI', pattern: /SBI/i },
+    { name: 'ICICI', pattern: /ICICI/i },
+    { name: 'AXIS', pattern: /AXIS/i },
+    { name: 'KOTAK', pattern: /KOTAK/i },
+    { name: 'AMEX', pattern: /AMEX|AMERICAN EXPRESS/i },
+    { name: 'PNB', pattern: /PNB|PUNJAB NATIONAL/i },
+    { name: 'BOB', pattern: /BOB|BARODA/i },
+    { name: 'Canara Bank', pattern: /CANARA/i },
+    { name: 'Indian Bank', pattern: /INDIAN BANK/i },
+    { name: 'Union Bank', pattern: /UNION BANK/i },
+    { name: 'Yes Bank', pattern: /YES BANK/i },
+    { name: 'IndusInd', pattern: /INDUSIND/i },
+    { name: 'IDFC', pattern: /IDFC/i },
+    { name: 'Standard Chartered', pattern: /SCB|STANDARD CHARTERED/i }
+  ];
+
+  for (const { name, pattern } of bankPatterns) {
+    if (pattern.test(upperBody)) {
+      bank = name;
+      break;
+    }
+  }
 
   const date = new Date(smsDate);
   return { amount, date, bank, raw: smsBody, type, merchant };

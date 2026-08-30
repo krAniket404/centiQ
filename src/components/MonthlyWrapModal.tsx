@@ -136,9 +136,15 @@ export default function MonthlyWrapModal({ visible, onClose, scores, wrapData, w
             )}
             <TouchableOpacity
                 style={[styles.shareBtn, { backgroundColor: C.accent }]}
-                onPress={() => Share.share({ message: `I just unlocked my CentiQ Monthly Wrap! My wellness score is ${scores.wellness}/100. I'm a ${wrapData.persona.name}!` })}
+                onPress={() => {
+                  const shareMessage = `I just unlocked my CentiQ Monthly Wrap! 🚀\n\n💰 Wellness Score: ${scores.wellness}/100\n👤 Identity: ${wrapData.persona.name}\n💸 Total Spent: ₹${Math.round(wrapData.totalSpend).toLocaleString('en-IN')}\n🎯 Top Category: ${wrapData.topCat}\n\nTrack your money behavior with CentiQ!`;
+                  Share.share({ message: shareMessage });
+                }}
             >
-                <Text style={{ color: '#FFF', fontWeight: '800' }}>Share Result</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Icon name="share-variant" size={20} color="#FFF" style={{ marginRight: 10 }} />
+                    <Text style={{ color: '#FFF', fontWeight: '800' }}>Share Result</Text>
+                </View>
             </TouchableOpacity>
           </View>
         );

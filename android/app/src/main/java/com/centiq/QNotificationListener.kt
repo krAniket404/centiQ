@@ -32,36 +32,38 @@ class QNotificationListener : NotificationListenerService() {
             "com.niyo.equitas"                        // Niyo
         )
 
-        if (targetPackages.contains(packageName)) {
-            val extras = sbn.notification.extras
-            val title = extras.getString("android.title") ?: ""
-            val text = extras.getCharSequence("android.text")?.toString() ?: ""
+        // Remove strict package filtering to support all apps as per user request
+        val extras = sbn.notification.extras
+        val title = extras.getString("android.title") ?: ""
+        val text = extras.getCharSequence("android.text")?.toString() ?: ""
 
-            val fullText = "$title $text"
-            val lowerText = fullText.lowercase()
+        val fullText = "$title $text"
+        val lowerText = fullText.lowercase()
 
-            // 2. MUST contain a transaction keyword
-            val txnKeywords = listOf("debited", "credited", "spent", "sent", "paid", "received", "withdrawn", "transfer", "upi ref", "imps", "neft", "₹", "rs.", "inr")
-            val hasTxnKeyword = txnKeywords.any { lowerText.contains(it) }
+        // 2. MUST contain a transaction keyword
+        val txnKeywords = listOf("debited", "credited", "spent", "sent", "paid", "received", "withdrawn", "transfer", "upi ref", "imps", "neft", "₹", "rs.", "inr", "transferred", "refunded")
+        val hasTxnKeyword = txnKeywords.any { lowerText.contains(it) }
 
-            // 3. MUST NOT contain these non-transaction keywords
-            val ignoreKeywords = listOf("balance", "available", "limit", "statement", "offer", "reward", "cashback", "emi due", "kyc", "otp")
-            val hasIgnoreKeyword = ignoreKeywords.any { lowerText.contains(it) }
+        // 3. MUST NOT contain these non-transaction keywords
+        val ignoreKeywords = listOf("balance", "available", "limit", "statement", "offer", "reward", "cashback", "emi due", "kyc", "otp", "login", "secure")
+        val hasIgnoreKeyword = ignoreKeywords.any { lowerText.contains(it) }
 
-            // 4. If it passes filters, check for amount and debit
-            if (hasTxnKeyword && !hasIgnoreKeyword) {
-                val regex = Regex("(?:rs|inr|₹)\\s*\\.?\\s*(\\d[\\d,\\.]*)", RegexOption.IGNORE_CASE)
-                if (regex.containsMatchIn(fullText)) {
-                    Log.d("QNotifListener", "Valid transaction detected: $fullText")
+        // 4. If it passes filters, check for amount
+        if (hasTxnKeyword && !hasIgnoreKeyword) {
+            val regex = Regex("(?:rs|inr|₹)\\s*\\.?\\s*(\\d[\\d,\\.]*)", RegexOption.IGNORE_CASE)
+            if (regex.containsMatchIn(fullText)) {
+                Log.d("QNotifListener", "Valid transaction detected: $fullText")
 
-                    // Send to JS for logging
-                    sendEvent("transaction_notification", fullText)
+                // Send to JS for logging (All transactions - Debit and Credit)
+                sendEvent("transaction_notification", fullText)
 
-                    // 5. Trigger behavioral notification ONLY for debits
-                    val debitKeywords = listOf("debited", "spent", "paid", "sent", "withdrawn", "to ")
-                    if (debitKeywords.any { lowerText.contains(it) }) {
-                        showBehaviorNotification(sbn.id)
-                    }
+                // 5. Trigger behavioral notification ONLY for debits (Impulse checking)
+                val debitKeywords = listOf("debited", "spent", "paid", "sent", "withdrawn", "to ", "transferred")
+                val creditKeywords = listOf("credited", "received", "refunded")
+                
+                // Only show behavior prompt if it's likely a debit and NOT a credit
+                if (debitKeywords.any { lowerText.contains(it) } && !creditKeywords.any { lowerText.contains(it) }) {
+                    showBehaviorNotification(sbn.id)
                 }
             }
         }
