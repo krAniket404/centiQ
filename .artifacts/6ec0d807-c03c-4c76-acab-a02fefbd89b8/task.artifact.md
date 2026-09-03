@@ -1,0 +1,13 @@
+- [x] **Data Normalization & Categorization**
+    - [x] [smsParser.ts](file:///C:/Users/Sherly Sanjana.A/CentiQ/src/lib/smsParser.ts): Implement merchant name normalization.
+    - [x] [categorizer.ts](file:///C:/Users/Sherly Sanjana.A/CentiQ/src/lib/categorizer.ts): Merge "Food Delivery" and "Fast Food" into "Dining & Delivery".
+- [x] **Discipline Streak Refactoring**
+    - [x] [App.tsx](file:///C:/Users/Sherly Sanjana.A/CentiQ/App.tsx): Refactor `activeStreaks` to store activation timestamps.
+    - [x] [App.tsx](file:///C:/Users/Sherly Sanjana.A/CentiQ/App.tsx): Combine `food_delivery` and `fast_food` streaks into `dining_discipline`.
+    - [x] [App.tsx](file:///C:/Users/Sherly Sanjana.A/CentiQ/App.tsx): Update streak calculation logic to respect activation date.
+- [x] **Subscription Leak Intelligence**
+    - [x] [behavioralEngine.ts](file:///C:/Users/Sherly Sanjana.A/CentiQ/src/lib/behavioralEngine.ts): Enhanced logic to detect price hikes and duplicate subs.
+    - [x] [App.tsx](file:///C:/Users/Sherly Sanjana.A/CentiQ/App.tsx): Integrated leak detection into the Insights engine.
+- [x] **Verification**
+    - [x] Manual verification of UI changes.
+    - [x] Verify category merging in Transactions.

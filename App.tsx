@@ -65,7 +65,7 @@ export default function App() {
   const [showPauseModal, setShowPauseModal] = useState(false);
   const [pauseName, setPauseName] = useState('');
   const [pauseAmount, setPauseAmount] = useState('');
-  const [activeStreaks, setActiveStreaks] = useState<string[]>(['late_night']);
+  const [activeStreaks, setActiveStreaks] = useState<Record<string, number>>({});
   const [showStreakModal, setShowStreakModal] = useState(false);
   const [activeWeekIndex, setActiveWeekIndex] = useState(0);
   const [morningQuote, setMorningQuote] = useState<string | null>(null);
@@ -264,11 +264,31 @@ export default function App() {
     const now = new Date();
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const dayOfMonth = now.getDate();
+
+    // Current Month Data
     const monthTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear());
     const spentSoFar = monthTxns.reduce((a, b) => a + b.amount, 0);
     const monthlyIncome = transactions.filter(t => t.type === 'credit' && t.date.getMonth() === now.getMonth() && t.date.getFullYear() === now.getFullYear()).reduce((a, b) => a + b.amount, 0);
+
+    // Linear Projection for Current Month
     const avgDailySpend = dayOfMonth > 0 ? spentSoFar / dayOfMonth : 0;
-    const projectedSpend = avgDailySpend * daysInMonth;
+    const currentProjected = avgDailySpend * daysInMonth;
+
+    // Last Month Data for "Warm Start" during first week
+    const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonth = lastMonthDate.getMonth();
+    const lastMonthYear = lastMonthDate.getFullYear();
+    const lastMonthTxns = transactions.filter(t => t.type === 'debit' && t.date.getMonth() === lastMonth && t.date.getFullYear() === lastMonthYear);
+    const lastMonthSpend = lastMonthTxns.reduce((a, b) => a + b.amount, 0);
+
+    // Blending Logic (Day 1-7)
+    let projectedSpend = currentProjected;
+    if (dayOfMonth <= 7 && lastMonthSpend > 0) {
+        // Transition from last month's actual to current month's projected pace
+        const weight = dayOfMonth / 7;
+        projectedSpend = (currentProjected * weight) + (lastMonthSpend * (1 - weight));
+    }
+
     const riskRatio = monthlyIncome > 0 ? (projectedSpend / monthlyIncome) : 0;
     const overspendRisk = Math.max(0, Math.min(100, Math.round(riskRatio * 100)));
     let riskLevel = 'Low';
@@ -360,14 +380,15 @@ export default function App() {
   }, [monthlyWeeklyData]);
 
   const recurringCharges = useMemo(() => {
-    if (!Array.isArray(transactions) || transactions.length === 0) return { knownSubscriptions: [], repetitivePayments: [], totalSubsCost: 0, totalRepetitiveCost: 0 };
-    const result = detectSubscriptionLeaks(transactions, worthItTxnIds) || { knownSubscriptions: [], repetitivePayments: [] };
+    if (!Array.isArray(transactions) || transactions.length === 0) return { knownSubscriptions: [], repetitivePayments: [], leaks: [], totalSubsCost: 0, totalRepetitiveCost: 0 };
+    const result = detectSubscriptionLeaks(transactions, worthItTxnIds) || { knownSubscriptions: [], repetitivePayments: [], leaks: [] };
     const knownSubs = result.knownSubscriptions || [];
     const repetitivePays = result.repetitivePayments || [];
+    const leaks = result.leaks || [];
     const totalSubsCost = knownSubs.reduce((sum: number, l: any) => sum + l.amount, 0);
     const totalRepetitiveCost = repetitivePays.reduce((sum: number, l: any) => sum + l.amount, 0);
-    return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays, totalSubsCost, totalRepetitiveCost };
-  }, [transactions]);
+    return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays, leaks, totalSubsCost, totalRepetitiveCost };
+  }, [transactions, worthItTxnIds]);
 
   const behavioralProfile = useMemo(() => {
     if (!Array.isArray(transactions) || transactions.length === 0) {
@@ -430,6 +451,16 @@ export default function App() {
       insights.push({ icon: 'alert-circle-outline', title: 'UNUSUAL SPENDING', text: `You made ${highValueTxns.length} transactions significantly larger than your average of ₹${Math.round(avgAmount)}.`, color: theme.danger });
     }
 
+    // Subscription Leak Insights
+    recurringCharges.leaks.forEach(leak => {
+      insights.unshift({
+        icon: leak.type === 'duplicate' ? 'content-copy' : 'trending-up',
+        title: leak.type === 'duplicate' ? 'DUPLICATE CHARGE' : 'SUBSCRIPTION HIKE',
+        text: `${leak.merchant}: ${leak.reason}. This is a "leak" that could be avoided!`,
+        color: C.danger
+      });
+    });
+
     // Vault Automation: Surplus Detection (Fix #3)
     const now = new Date();
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
@@ -463,9 +494,8 @@ export default function App() {
         return keywords.some(k => m.includes(k));
       });
     };
-    if (hasMerchant(['SWIGGY', 'ZOMATO', 'DOMINOS', 'EATS', 'PIZZA'])) unlocked.push('food_delivery');
     if (hasMerchant(['AMAZON', 'FLIPKART', 'MYNTRA', 'AJIO', 'NYKAA'])) unlocked.push('online_shopping');
-    if (hasMerchant(['MCDONALD', 'KFC', 'BURGER', 'SUBWAY', 'WENDYS'])) unlocked.push('fast_food');
+    if (hasMerchant(['SWIGGY', 'ZOMATO', 'DOMINOS', 'EATS', 'PIZZA', 'MCDONALD', 'KFC', 'BURGER', 'SUBWAY', 'WENDYS'])) unlocked.push('dining_discipline');
     if (hasMerchant(['UBER', 'OLA', 'RAPIDO', 'LYFT'])) unlocked.push('ride_hailing');
     if (hasMerchant(['STARBUCKS', 'CCD', 'CAFE', 'COFFEE', 'COSTA'])) unlocked.push('coffee');
     return Array.from(new Set(unlocked));
@@ -480,12 +510,14 @@ export default function App() {
     const avgAmt = totalSpend / debitTxns.length;
     const results: { [key: string]: number } = {};
 
-    (activeStreaks || []).forEach(streakId => {
-      let streak = 0;
+    Object.entries(activeStreaks || {}).forEach(([streakId, activationTime]) => {
+      let streakCount = 0;
       let checkDate = new Date();
       checkDate.setHours(0, 0, 0, 0);
+      const activationDate = new Date(activationTime);
+      activationDate.setHours(0, 0, 0, 0);
 
-      while (true) {
+      while (checkDate >= activationDate) {
         const dateStr = checkDate.toDateString();
         const dayTxns = debitTxns.filter(t => t.date.toDateString() === dateStr);
 
@@ -501,20 +533,16 @@ export default function App() {
             if (day === 0 || day === 6) {
               broken = dayTxns.some(t => t.amount > avgAmt * 1.5);
             }
-          } else if (streakId === 'food_delivery') {
+          } else if (streakId === 'dining_discipline') {
             broken = dayTxns.some(t => {
               const m = (t.merchant || '').toUpperCase();
-              return m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('EATS') || m.includes('PIZZA');
+              return m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('EATS') || m.includes('PIZZA') ||
+                     m.includes('MCDONALD') || m.includes('KFC') || m.includes('BURGER') || m.includes('SUBWAY') || m.includes('WENDYS');
             });
           } else if (streakId === 'online_shopping') {
             broken = dayTxns.some(t => {
               const m = (t.merchant || '').toUpperCase();
               return m.includes('AMAZON') || m.includes('FLIPKART') || m.includes('MYNTRA') || m.includes('AJIO') || m.includes('NYKAA');
-            });
-          } else if (streakId === 'fast_food') {
-            broken = dayTxns.some(t => {
-              const m = (t.merchant || '').toUpperCase();
-              return m.includes('MCDONALD') || m.includes('KFC') || m.includes('BURGER') || m.includes('SUBWAY') || m.includes('WENDYS');
             });
           } else if (streakId === 'ride_hailing') {
             broken = dayTxns.some(t => {
@@ -532,12 +560,12 @@ export default function App() {
         if (broken) {
           break;
         } else {
-          streak++;
+          streakCount++;
           checkDate.setDate(checkDate.getDate() - 1);
-          if (streak > 365) break;
+          if (streakCount > 365) break;
         }
       }
-      results[streakId] = Math.max(0, streak - 1);
+      results[streakId] = Math.max(0, streakCount - 1);
     });
     return results;
   }, [transactions, activeStreaks]);
@@ -1298,18 +1326,17 @@ export default function App() {
                     </TouchableOpacity>
                   </View>
 
-                  {activeStreaks.length === 0 ? (
+                  {Object.keys(activeStreaks).length === 0 ? (
                     <Text style={{ color: C.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 10, lineHeight: 19 }}>
                       No habits selected. Tap "Manage" to choose which bad habits you want to break!
                     </Text>
                   ) : (
-                    activeStreaks.map(id => {
+                    Object.keys(activeStreaks).map(id => {
                       const config = {
                         late_night: { icon: 'weather-night', name: 'Late Night Spending', desc: 'No transactions 10PM-6AM' },
                         weekend: { icon: 'party-popper', name: 'Weekend Splurging', desc: 'No large purchases on Sat/Sun' },
-                        food_delivery: { icon: 'food-apple-outline', name: 'Food Delivery', desc: 'No Swiggy/Zomato/Eats' },
+                        dining_discipline: { icon: 'food-apple-outline', name: 'Dining & Delivery', desc: 'No Swiggy/Zomato/KFC/etc' },
                         online_shopping: { icon: 'shopping-outline', name: 'Online Shopping', desc: 'No Amazon/Flipkart' },
-                        fast_food: { icon: 'food-apple-outline', name: 'Fast Food', desc: 'No McDonalds/KFC/Burger' },
                         ride_hailing: { icon: 'car', name: 'Ride Hailing', desc: 'No Uber/Ola/Rapido' },
                         coffee: { icon: 'coffee', name: 'Coffee', desc: 'No Starbucks/Cafe' }
                       }[id as keyof typeof streakData | string];
@@ -1889,12 +1916,17 @@ export default function App() {
           <View style={[styles.briefingCard, { maxHeight: '80%' }]}>
             <Text style={styles.briefingTitle}>Streaks</Text>
             <ScrollView style={{ width: '100%' }}>
-              {['late_night', 'weekend', 'food_delivery', 'online_shopping', 'fast_food', 'ride_hailing', 'coffee'].map(id => (
-                <TouchableOpacity key={id} style={[styles.habitRow, activeStreaks.includes(id) && { borderColor: C.accent }]} onPress={() => {
-                  const updated = activeStreaks.includes(id) ? activeStreaks.filter(s => s !== id) : [...activeStreaks, id];
+              {['late_night', 'weekend', 'dining_discipline', 'online_shopping', 'ride_hailing', 'coffee'].map(id => (
+                <TouchableOpacity key={id} style={[styles.habitRow, !!activeStreaks[id] && { borderColor: C.accent }]} onPress={() => {
+                  const updated = { ...activeStreaks };
+                  if (updated[id]) {
+                    delete updated[id];
+                  } else {
+                    updated[id] = Date.now();
+                  }
                   setActiveStreaks(updated); saveState({ activeStreaks: updated });
                 }}>
-                  <Text style={{ color: '#FFF' }}>{id.replace('_', ' ')}</Text>
+                  <Text style={{ color: '#FFF' }}>{id.replace('_', ' ').toUpperCase()}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>

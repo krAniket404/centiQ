@@ -129,3 +129,50 @@ export function parseBankSMS(smsBody: string, smsDate: number): ParsedTransactio
   const date = new Date(smsDate);
   return { amount, date, bank, raw: smsBody, type, merchant };
 }
+
+/**
+ * Normalizes merchant names by removing legal suffixes, cleaning VPA junk,
+ * and mapping common variations to a standard name.
+ */
+function normalizeMerchantName(name: string): string {
+  if (!name || name === 'Unknown') return name;
+
+  let n = name.toUpperCase();
+
+  // 1. Remove legal suffixes and common garbage
+  n = n.replace(/\b(PVT|LTD|PRIVATE|LIMITED|CORP|INC|LLP|INDIA|RETAIL|SERVICES|PAYMENTS|DIGITAL|ONLINE|SOLUTIONS|MERCANTILE)\b/g, '');
+
+  // 2. Clean VPA/UPI junk (already partially done, but let's be thorough)
+  n = n.replace(/\b(YBL|OKAXIS|OKHDFCBANK|OKICICI|UPI|VPA|TXN|TRF|TRANSFER)\b/g, '');
+
+  // 3. Remove non-alphanumeric at start/end
+  n = n.replace(/^[^A-Z0-9]+|[^A-Z0-9]+$/g, '');
+
+  // 4. Map variations to standard names
+  const mapping: { [key: string]: string } = {
+    'SWIGGY': 'SWIGGY',
+    'ZOMATO': 'ZOMATO',
+    'AMAZON': 'AMAZON',
+    'FLIPKART': 'FLIPKART',
+    'BLINKIT': 'BLINKIT',
+    'INSTAMART': 'SWIGGY INSTAMART',
+    'ZEPTO': 'ZEPTO',
+    'UBER': 'UBER',
+    'OLA': 'OLA',
+    'RAPIDO': 'RAPIDO',
+    'BIGBASKET': 'BIGBASKET',
+    'NETFLIX': 'NETFLIX',
+    'SPOTIFY': 'SPOTIFY',
+    'RELIANCE': 'RELIANCE',
+    'JIO': 'JIO',
+    'AIRTEL': 'AIRTEL',
+    'STARBUCKS': 'STARBUCKS'
+  };
+
+  for (const [key, val] of Object.entries(mapping)) {
+    if (n.includes(key)) return val;
+  }
+
+  // 5. Final cleanup: collapse spaces
+  return n.replace(/\s+/g, ' ').trim();
+}

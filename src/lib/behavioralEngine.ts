@@ -129,11 +129,22 @@ export interface RecurringCharge {
   transactions: ParsedTransaction[];
   hasPriceIncrease?: boolean;
   isGhost?: boolean;
+  isDuplicate?: boolean;
+  previousAmount?: number;
 }
 
 export interface SubscriptionResult {
   knownSubscriptions: RecurringCharge[];
   repetitivePayments: RecurringCharge[];
+  leaks: SubscriptionLeak[];
+}
+
+export interface SubscriptionLeak {
+  merchant: string;
+  type: 'price_hike' | 'duplicate' | 'new_recurring';
+  amount: number;
+  previousAmount?: number;
+  reason: string;
 }
 
 export function detectSubscriptionLeaks(transactions: ParsedTransaction[], worthItTxnIds: string[] = []): SubscriptionResult {
@@ -147,6 +158,7 @@ export function detectSubscriptionLeaks(transactions: ParsedTransaction[], worth
 
   const knownSubs: RecurringCharge[] = [];
   const repetitivePays: RecurringCharge[] = [];
+  const leaks: SubscriptionLeak[] = [];
   const sixtyDaysAgo = Date.now() - (60 * 24 * 60 * 60 * 1000);
 
   Object.values(recurringMap).forEach(group => {
@@ -160,13 +172,48 @@ export function detectSubscriptionLeaks(transactions: ParsedTransaction[], worth
       const recentTxns = group.filter(t => t.date.getTime() > sixtyDaysAgo);
       const isGhost = recentTxns.length > 0 && !recentTxns.some(t => worthItTxnIds.includes(t.id!));
 
+      // Duplicate detection (same week, same amount)
+      let isDuplicate = false;
+      if (recentTxns.length >= 2) {
+        for (let i = 0; i < recentTxns.length; i++) {
+          for (let j = i + 1; j < recentTxns.length; j++) {
+            const d1 = recentTxns[i].date;
+            const d2 = recentTxns[j].date;
+            const dayDiff = Math.abs(d1.getTime() - d2.getTime()) / (1000 * 60 * 60 * 24);
+            if (dayDiff < 3 && Math.abs(recentTxns[i].amount - recentTxns[j].amount) < 2) {
+              isDuplicate = true;
+              leaks.push({
+                merchant: group[0].merchant,
+                type: 'duplicate',
+                amount: recentTxns[i].amount,
+                reason: `Double charged ₹${recentTxns[i].amount} on ${d1.toLocaleDateString()}`
+              });
+              break;
+            }
+          }
+          if (isDuplicate) break;
+        }
+      }
+
+      if (hasPriceIncrease) {
+        leaks.push({
+          merchant: group[0].merchant,
+          type: 'price_hike',
+          amount: latestAmt,
+          previousAmount: previousAmt,
+          reason: `Price hiked from ₹${previousAmt} to ₹${latestAmt}`
+        });
+      }
+
       const charge: RecurringCharge = {
         merchant: group[0].merchant,
-        amount: latestAmt, // Show latest individual charge amount
+        amount: latestAmt,
         count: group.length,
         transactions: group,
         hasPriceIncrease,
-        isGhost
+        isGhost,
+        isDuplicate,
+        previousAmount: previousAmt
       };
 
       if (isKnownSubscription(charge.merchant)) {
@@ -177,7 +224,7 @@ export function detectSubscriptionLeaks(transactions: ParsedTransaction[], worth
     }
   });
 
-  return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays };
+  return { knownSubscriptions: knownSubs, repetitivePayments: repetitivePays, leaks };
 }
 
 export function calculateWellnessScore(discipline: number, impulse: number, volatility: number): number {

@@ -4,8 +4,8 @@ export function categorizeMerchant(merchant: string): string {
   // 1. Groceries
   if (m.includes('INSTAMART') || m.includes('BLINKIT') || m.includes('ZEPTO') || m.includes('BIGBASKET') || m.includes('GROCER') || m.includes('DMART') || m.includes('FRESH') || m.includes('RELIANCE SMART') || m.includes('MORE SUPER') || m.includes('SPENCER') || m.includes('NATURES BASKET')) return 'Groceries';
 
-  // 2. Food & Dining
-  if (m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('PIZZA') || m.includes('MCDONALD') || m.includes('KFC') || m.includes('BIRYANI') || m.includes('RESTAURANT') || m.includes('EATS') || m.includes('BURGER') || m.includes('CAFE') || m.includes('KITCHEN') || m.includes('DHABA') || m.includes('FOOD') || m.includes('BEVERAGE') || m.includes('COFFEE') || m.includes('TEA')) return 'Food';
+  // 2. Dining & Delivery (Unified Food)
+  if (m.includes('SWIGGY') || m.includes('ZOMATO') || m.includes('DOMINOS') || m.includes('PIZZA') || m.includes('MCDONALD') || m.includes('KFC') || m.includes('BIRYANI') || m.includes('RESTAURANT') || m.includes('EATS') || m.includes('BURGER') || m.includes('CAFE') || m.includes('KITCHEN') || m.includes('DHABA') || m.includes('FOOD') || m.includes('BEVERAGE') || m.includes('COFFEE') || m.includes('TEA') || m.includes('SUBWAY') || m.includes('WENDYS') || m.includes('BURGER KING')) return 'Dining & Delivery';
 
   // 3. Shopping
   if (m.includes('AMAZON') || m.includes('FLIPKART') || m.includes('NYKAA') || m.includes('MEESHO') || m.includes('MYNTRA') || m.includes('AJIO') || m.includes('JIO MART') || m.includes('RELIANCE') || m.includes('MART') || m.includes('STORE') || m.includes('SHOP') || m.includes('BAZAAR') || m.includes('LIFESTYLE') || m.includes('PANTALOON') || m.includes('WESTSIDE')) return 'Shopping';
